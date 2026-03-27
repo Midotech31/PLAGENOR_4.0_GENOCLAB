@@ -525,7 +525,7 @@ def _tab_documents():
     st.markdown("---")
     st.markdown("#### 📄 Générer un document")
     requests = get_all_active_requests()
-    validated = [r for r in requests if r.get("status") in ("VALIDATION","VALIDATED","APPROVED")]
+    validated = [r for r in requests if r.get("status") in ("VALIDATION_PEDAGOGIQUE","VALIDATION_FINANCE","PLATFORM_NOTE_GENERATED","QUOTE_VALIDATED_BY_CLIENT")]
     if validated:
         ro = {f"{r.get('title','')} ({r.get('channel','')})": r.get("id") for r in validated}
         sel = st.selectbox("Demande", list(ro.keys()), key="gd_s")

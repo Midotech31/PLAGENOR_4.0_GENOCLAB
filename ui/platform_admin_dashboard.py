@@ -164,7 +164,7 @@ def _pending(user):
                             except Exception as e: st.error(f"❌ {e}")
 
             # ── REPORT REVIEW (when REPORT_UPLOADED or ADMIN_REVIEW) ──
-            if req.get("status") in ("REPORT_UPLOADED", "ADMIN_REVIEW"):
+            if req.get("status") in ("REPORT_UPLOADED", "REPORT_VALIDATED"):
                 st.markdown("---")
                 st.markdown("##### 📄 Révision du rapport")
                 report_file = req.get("report_file", "")

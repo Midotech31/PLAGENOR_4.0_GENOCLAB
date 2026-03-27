@@ -73,47 +73,79 @@ def notify_workflow_transition(request: dict, to_state: str, actor: dict):
     title = request.get("title", "Demande")
 
     notification_map = {
-        "VALIDATED": {
-            "targets": [request.get("requester_id"), request.get("client_id")],
-            "msg": f"✅ Votre demande '{title}' a été validée.",
+        # ── IBTIKAR workflow notifications ──
+        "SUBMITTED": {
+            "targets": [],  # admin notified via dashboard
+            "msg": f"📋 Nouvelle demande soumise: '{title}'.",
+            "roles": [config.ROLE_PLATFORM_ADMIN],
+        },
+        "VALIDATION_PEDAGOGIQUE": {
+            "targets": [request.get("requester_id")],
+            "msg": f"🎓 Votre demande '{title}' a passé la validation pédagogique.",
+        },
+        "VALIDATION_FINANCE": {
+            "targets": [request.get("requester_id")],
+            "msg": f"💰 Votre demande '{title}' a été approuvée financièrement.",
+        },
+        "PLATFORM_NOTE_GENERATED": {
+            "targets": [request.get("requester_id")],
+            "msg": f"📋 La note de plateforme pour '{title}' a été générée.",
         },
         "REJECTED": {
             "targets": [request.get("requester_id"), request.get("client_id")],
             "msg": f"❌ Votre demande '{title}' a été rejetée.",
-        },
-        "VALIDATION": {
-            "targets": [request.get("requester_id"), request.get("client_id")],
-            "msg": f"✅ Votre demande '{title}' a été validée.",
-        },
-        "APPROVED": {
-            "targets": [request.get("requester_id")],
-            "msg": f"🏦 Votre demande '{title}' a été approuvée financièrement.",
         },
         "ASSIGNED": {
             "targets": [request.get("assigned_to")],
             "msg": f"🔬 Une nouvelle analyse vous a été assignée: '{title}'.",
             "roles": [config.ROLE_MEMBER],
         },
+        "SAMPLE_RECEIVED": {
+            "targets": [request.get("requester_id"), request.get("client_id")],
+            "msg": f"📦 Vos échantillons pour '{title}' ont été réceptionnés.",
+        },
+        "ANALYSIS_STARTED": {
+            "targets": [request.get("requester_id"), request.get("client_id")],
+            "msg": f"🔬 L'analyse pour '{title}' a démarré.",
+        },
+        "ANALYSIS_FINISHED": {
+            "targets": [],
+            "msg": f"🧪 L'analyse pour '{title}' est terminée.",
+            "roles": [config.ROLE_PLATFORM_ADMIN],
+        },
+        # ── GENOCLAB workflow notifications ──
+        "REQUEST_CREATED": {
+            "targets": [],
+            "msg": f"📥 Nouvelle demande GENOCLAB: '{title}'.",
+            "roles": [config.ROLE_PLATFORM_ADMIN],
+        },
         "QUOTE_SENT": {
             "targets": [request.get("client_id")],
             "msg": f"💵 Un devis pour '{title}' vous a été envoyé.",
+        },
+        "QUOTE_VALIDATED_BY_CLIENT": {
+            "targets": [],
+            "msg": f"🤝 Le devis pour '{title}' a été accepté par le client.",
+            "roles": [config.ROLE_PLATFORM_ADMIN, config.ROLE_FINANCE],
         },
         "INVOICE_GENERATED": {
             "targets": [request.get("client_id")],
             "msg": f"🧾 La facture pour '{title}' a été générée.",
             "roles": [config.ROLE_FINANCE],
         },
+        "PAYMENT_CONFIRMED": {
+            "targets": [request.get("client_id")],
+            "msg": f"💳 Le paiement pour '{title}' a été confirmé.",
+        },
+        # ── Shared final states ──
+        "REPORT_UPLOADED": {
+            "targets": [],
+            "msg": f"📄 Le rapport pour '{title}' a été uploadé.",
+            "roles": [config.ROLE_PLATFORM_ADMIN],
+        },
         "REPORT_VALIDATED": {
             "targets": [request.get("requester_id"), request.get("client_id")],
-            "msg": f"📋 Le rapport pour '{title}' a été validé.",
-        },
-        "SENT_TO_REQUESTER": {
-            "targets": [request.get("requester_id")],
-            "msg": f"📬 Les résultats de '{title}' vous ont été transmis.",
-        },
-        "SENT_TO_CLIENT": {
-            "targets": [request.get("client_id")],
-            "msg": f"📬 Les résultats de '{title}' vous ont été transmis.",
+            "msg": f"📋 Le rapport pour '{title}' a été validé et est disponible.",
         },
         "COMPLETED": {
             "targets": [request.get("requester_id"), request.get("client_id")],
