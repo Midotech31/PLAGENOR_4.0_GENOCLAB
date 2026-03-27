@@ -88,7 +88,7 @@ def _render_super_admin_dashboard_inner(user):
     with tabs[4]: _tab_forms(user)
     with tabs[5]: _tab_payments(user)
     with tabs[6]: _tab_productivity()
-    with tabs[7]: _tab_documents()
+    with tabs[7]: _tab_documents(user)
     with tabs[8]: _tab_audit()
     with tabs[9]: _tab_system(user)
 
@@ -509,7 +509,7 @@ def _tab_productivity():
         with c4: st.markdown(f"<div style='font-size:36px;text-align:center'>{em}</div>", unsafe_allow_html=True)
         st.markdown("<div style='border-bottom:1px solid #f0f2f6'></div>", unsafe_allow_html=True)
 
-def _tab_documents():
+def _tab_documents(user):
     docs = get_all_documents()
     section_header(f"Documents ({len(docs)})", "📄")
     if not docs: render_empty_state("📄","Aucun document"); return

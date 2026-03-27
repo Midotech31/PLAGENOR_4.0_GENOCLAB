@@ -363,7 +363,6 @@ def _documents(user):
             st.markdown(f"{icon} **{d.get('filename','')}** · {dt} · {fmt_datetime(d.get('created_at',''))}")
             fp = d.get("filepath","")
             if fp and os.path.exists(fp):
-                import os
                 with open(fp,"rb") as f:
                     st.download_button(f"⬇️ Télécharger", f.read(), file_name=os.path.basename(fp), key=f"dl_{d.get('id','')[:8]}")
             st.markdown("<div style='border-bottom:1px solid #f0f2f6'></div>", unsafe_allow_html=True)
