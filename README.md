@@ -11,19 +11,6 @@ cd plagenor
 streamlit run app.py
 ```
 
-Open http://localhost:8501
-
-## 🔐 Credentials
-
-| Username | Password | Role |
-|---|---|---|
-| superadmin | SuperAdmin2026! | Full control |
-| admin | Admin2026! | Platform Admin |
-| finance1 | Finance2026! | Finance |
-| member1 | Member2026! | Analyst |
-| requester1 | Requester2026! | IBTIKAR Requester |
-| client1 | Client2026! | GENOCLAB Client |
-
 New users: self-register as CLIENT or submit as GUEST on home page.
 
 ## 🔁 Workflows
