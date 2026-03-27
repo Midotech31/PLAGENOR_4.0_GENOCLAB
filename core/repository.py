@@ -1,8 +1,8 @@
 # core/repository.py — PLAGENOR 4.0 Data Repository Layer
-# All JSON file I/O. Thread-safe. No business logic.
+# SQLite storage. Thread-safe via thread-local connections. No business logic.
 
 from __future__ import annotations
-import json, os, threading, uuid, shutil
+import json, os, sqlite3, threading, uuid, shutil
 from datetime import datetime, timezone
 from typing import Optional, Any
 import config
@@ -13,7 +13,7 @@ try:
 except Exception:
     _HAS_ST = False
 
-# ── File paths ────────────────────────────────────────────────────────────────
+# ── Legacy JSON file paths (kept for migration detection) ────────────────────
 USERS_FILE             = config.USERS_FILE
 MEMBERS_FILE           = config.MEMBERS_FILE
 SERVICES_FILE          = config.SERVICES_FILE
@@ -34,135 +34,425 @@ ALL_DATA_FILES = [
     AUDIT_LOGS_FILE, DOCUMENTS_FILE, NOTIFICATIONS_FILE,
 ]
 
-_LOCKS = {path: threading.Lock() for path in ALL_DATA_FILES}
+# ── Thread-local SQLite connections ──────────────────────────────────────────
+_local = threading.local()
 
-def _lock_for(path):
-    if path not in _LOCKS:
-        _LOCKS[path] = threading.Lock()
-    return _LOCKS[path]
+def _get_db() -> sqlite3.Connection:
+    """Return a thread-local SQLite connection."""
+    conn = getattr(_local, "conn", None)
+    if conn is None:
+        os.makedirs(config.DATA_DIR, exist_ok=True)
+        conn = sqlite3.connect(config.DATABASE_FILE, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        _local.conn = conn
+    return conn
 
 
-# ── Low-level I/O ─────────────────────────────────────────────────────────────
-def _read_json(path):
-    lock = _lock_for(path)
-    with lock:
-        if not os.path.exists(path):
-            return []
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return data if isinstance(data, list) else []
-        except (json.JSONDecodeError, Exception):
-            return []
+# ── JSON field helpers ───────────────────────────────────────────────────────
+_JSON_FIELDS_MEMBERS = {"skills", "points_history", "cheers"}
+_JSON_FIELDS_REQUESTS = {
+    "pricing", "requester", "service_params",
+    "sample_table", "comments", "history", "samples", "tasks",
+}
+_JSON_FIELDS_INVOICES = {"line_items"}
+_JSON_FIELDS_AUDIT = {"details"}
 
-def _write_json(path, data):
-    lock = _lock_for(path)
-    with lock:
-        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2, default=str)
-        os.replace(tmp, path)
 
-def _read_json_obj(path):
-    lock = _lock_for(path)
-    with lock:
-        if not os.path.exists(path):
-            return {}
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
+def _json_dumps(val) -> str:
+    if val is None:
+        return "null"
+    return json.dumps(val, ensure_ascii=False, default=str)
 
-def _write_json_obj(path, data):
-    lock = _lock_for(path)
-    with lock:
-        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2, default=str)
-        os.replace(tmp, path)
+
+def _json_loads(val, default=None):
+    if val is None:
+        return default
+    if isinstance(val, (dict, list)):
+        return val
+    try:
+        return json.loads(val)
+    except Exception:
+        return default
+
+
+def _row_to_dict(row: sqlite3.Row | None, json_fields: set | None = None) -> dict | None:
+    if row is None:
+        return None
+    d = dict(row)
+    # Convert SQLite integer booleans back where appropriate
+    for k in ("active", "available", "locked", "read", "archived",
+              "self_registered", "receipt_confirmed", "submitted_as_guest",
+              "guest_upgraded", "price_modified"):
+        if k in d and d[k] is not None:
+            d[k] = bool(d[k])
+    if json_fields:
+        for field in json_fields:
+            if field in d:
+                default = {} if field in ("pricing", "requester", "service_params", "details") else []
+                d[field] = _json_loads(d[field], default)
+    return d
+
+
+def _rows_to_list(cursor, json_fields: set | None = None) -> list:
+    return [_row_to_dict(row, json_fields) for row in cursor.fetchall()]
+
+
+# ── Schema creation ──────────────────────────────────────────────────────────
+_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    full_name TEXT NOT NULL DEFAULT '',
+    password_hash TEXT NOT NULL DEFAULT '',
+    role TEXT NOT NULL DEFAULT '',
+    email TEXT DEFAULT '',
+    organization_id TEXT DEFAULT 'ESSBO',
+    phone TEXT DEFAULT '',
+    student_level TEXT DEFAULT '',
+    supervisor TEXT DEFAULT '',
+    laboratory TEXT DEFAULT '',
+    active INTEGER DEFAULT 1,
+    self_registered INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS members (
+    id TEXT PRIMARY KEY,
+    full_name TEXT NOT NULL DEFAULT '',
+    name TEXT DEFAULT '',
+    user_id TEXT DEFAULT '',
+    max_load INTEGER DEFAULT 5,
+    current_load INTEGER DEFAULT 0,
+    skills TEXT DEFAULT '[]',
+    available INTEGER DEFAULT 1,
+    productivity_score REAL DEFAULT 50.0,
+    productivity_status TEXT DEFAULT 'NORMAL',
+    total_points INTEGER DEFAULT 0,
+    points_history TEXT DEFAULT '[]',
+    cheers TEXT DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS services (
+    id TEXT PRIMARY KEY,
+    code TEXT DEFAULT '',
+    name TEXT NOT NULL DEFAULT '',
+    description TEXT DEFAULT '',
+    channel TEXT DEFAULT '',
+    channels TEXT DEFAULT '',
+    channel_availability TEXT DEFAULT 'BOTH',
+    type TEXT DEFAULT 'Analysis',
+    base_price REAL DEFAULT 0,
+    price REAL DEFAULT 0,
+    ibtikar_price REAL DEFAULT 0,
+    genoclab_price REAL DEFAULT 0,
+    turnaround_days INTEGER DEFAULT 7,
+    service_code TEXT DEFAULT '',
+    active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT '',
+    updated_at TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS requests (
+    id TEXT PRIMARY KEY,
+    display_id TEXT DEFAULT '',
+    title TEXT DEFAULT '',
+    description TEXT DEFAULT '',
+    channel TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT '',
+    urgency TEXT DEFAULT 'Normal',
+    service_id TEXT DEFAULT '',
+    service_code TEXT DEFAULT '',
+    requester_id TEXT DEFAULT '',
+    client_id TEXT DEFAULT '',
+    assigned_to TEXT DEFAULT '',
+    budget_amount REAL DEFAULT 0,
+    declared_ibtikar_balance REAL DEFAULT 0,
+    quote_amount REAL DEFAULT 0,
+    admin_validated_price REAL,
+    price_modified INTEGER DEFAULT 0,
+    sample_count INTEGER DEFAULT 0,
+    requester_name TEXT DEFAULT '',
+    client_name TEXT DEFAULT '',
+    organization TEXT DEFAULT '',
+    contact TEXT DEFAULT '',
+    rejection_reason TEXT DEFAULT '',
+    report_file TEXT DEFAULT '',
+    admin_revision_notes TEXT DEFAULT '',
+    ibtikar_form_path TEXT DEFAULT '',
+    receipt_confirmed INTEGER DEFAULT 0,
+    receipt_confirmed_at TEXT,
+    receipt_confirmed_by TEXT,
+    service_rating INTEGER,
+    rated_at TEXT,
+    rating_comment TEXT DEFAULT '',
+    submitted_as_guest INTEGER DEFAULT 0,
+    guest_token TEXT,
+    guest_email TEXT DEFAULT '',
+    guest_name TEXT DEFAULT '',
+    guest_phone TEXT DEFAULT '',
+    guest_token_expires_at TEXT,
+    guest_upgraded INTEGER DEFAULT 0,
+    archived INTEGER DEFAULT 0,
+    archived_at TEXT,
+    pricing TEXT DEFAULT '{}',
+    requester TEXT DEFAULT '{}',
+    service_params TEXT DEFAULT '{}',
+    sample_table TEXT DEFAULT '[]',
+    comments TEXT DEFAULT '[]',
+    history TEXT DEFAULT '[]',
+    samples TEXT DEFAULT '[]',
+    tasks TEXT DEFAULT '[]',
+    payment_reference TEXT DEFAULT '',
+    justification TEXT DEFAULT '',
+    appointment_date TEXT DEFAULT '',
+    updated_by TEXT DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT '',
+    updated_at TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS invoices (
+    id TEXT PRIMARY KEY,
+    invoice_number TEXT UNIQUE,
+    request_id TEXT DEFAULT '',
+    client_id TEXT DEFAULT '',
+    client_name TEXT DEFAULT '',
+    channel TEXT DEFAULT 'GENOCLAB',
+    line_items TEXT DEFAULT '[]',
+    subtotal_ht REAL DEFAULT 0,
+    vat_rate REAL DEFAULT 0.19,
+    vat_amount REAL DEFAULT 0,
+    total_ttc REAL DEFAULT 0,
+    status TEXT DEFAULT 'GENERATED',
+    locked INTEGER DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT '',
+    created_by TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id TEXT PRIMARY KEY,
+    action TEXT NOT NULL DEFAULT '',
+    entity_type TEXT DEFAULT '',
+    entity_id TEXT DEFAULT '',
+    actor_id TEXT DEFAULT '',
+    actor_username TEXT DEFAULT '',
+    actor_role TEXT DEFAULT '',
+    channel TEXT DEFAULT '',
+    details TEXT DEFAULT '{}',
+    timestamp TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS documents (
+    id TEXT PRIMARY KEY,
+    type TEXT DEFAULT '',
+    filename TEXT DEFAULT '',
+    filepath TEXT DEFAULT '',
+    request_id TEXT DEFAULT '',
+    created_at TEXT DEFAULT '',
+    created_by TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id TEXT PRIMARY KEY,
+    user_id TEXT DEFAULT '',
+    role TEXT DEFAULT '',
+    title TEXT DEFAULT '',
+    message TEXT DEFAULT '',
+    type TEXT DEFAULT 'INFO',
+    request_id TEXT DEFAULT '',
+    channel TEXT DEFAULT '',
+    read INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS sequences (
+    key TEXT PRIMARY KEY,
+    value INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS revenue_archives (
+    id TEXT PRIMARY KEY,
+    period TEXT DEFAULT '',
+    month TEXT DEFAULT '',
+    archived_at TEXT DEFAULT '',
+    archived_by TEXT DEFAULT '',
+    genoclab_invoices_count INTEGER DEFAULT 0,
+    genoclab_total_ht REAL DEFAULT 0,
+    genoclab_total_vat REAL DEFAULT 0,
+    genoclab_total_ttc REAL DEFAULT 0,
+    ibtikar_virtual_revenue REAL DEFAULT 0,
+    ibtikar_budget_used REAL DEFAULT 0,
+    ibtikar_requests_count INTEGER DEFAULT 0,
+    ibtikar_students_count INTEGER DEFAULT 0,
+    ibtikar_budget_per_student REAL DEFAULT 200000,
+    ibtikar_budget_cap REAL DEFAULT 200000
+);
+
+CREATE TABLE IF NOT EXISTS override_logs (
+    id TEXT PRIMARY KEY,
+    request_id TEXT DEFAULT '',
+    actor_id TEXT DEFAULT '',
+    actor_username TEXT DEFAULT '',
+    amount REAL DEFAULT 0,
+    justification TEXT DEFAULT '',
+    timestamp TEXT DEFAULT '',
+    budget_used_at_time REAL DEFAULT 0,
+    budget_cap REAL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS payment_methods (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    active INTEGER DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS schema_version (
+    key TEXT PRIMARY KEY DEFAULT 'version',
+    version TEXT NOT NULL DEFAULT '0.0.0',
+    updated_at TEXT DEFAULT ''
+);
+"""
+
+_INDEXES_SQL = """
+CREATE INDEX IF NOT EXISTS idx_requests_channel ON requests(channel);
+CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
+CREATE INDEX IF NOT EXISTS idx_requests_requester ON requests(requester_id);
+CREATE INDEX IF NOT EXISTS idx_requests_client ON requests(client_id);
+CREATE INDEX IF NOT EXISTS idx_requests_assigned ON requests(assigned_to);
+CREATE INDEX IF NOT EXISTS idx_requests_archived ON requests(archived);
+CREATE INDEX IF NOT EXISTS idx_requests_created ON requests(created_at);
+CREATE INDEX IF NOT EXISTS idx_requests_guest_token ON requests(guest_token);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
+CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read);
+CREATE INDEX IF NOT EXISTS idx_invoices_client ON invoices(client_id);
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_members_user_id ON members(user_id);
+"""
+
+
+def _ensure_database():
+    """Create all tables and indexes if they don't exist."""
+    db = _get_db()
+    db.executescript(_SCHEMA_SQL)
+    db.executescript(_INDEXES_SQL)
+    db.commit()
 
 
 def ensure_data_directory():
+    """Bootstrap data directory and SQLite database."""
     os.makedirs(config.DATA_DIR, exist_ok=True)
-    for path in ALL_DATA_FILES:
-        if not os.path.exists(path):
-            ext_data = [] if path != INVOICE_SEQUENCE_FILE else {"last": 0}
-            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(ext_data, f, ensure_ascii=False, indent=2)
+    os.makedirs(config.BACKUPS_DIR, exist_ok=True)
+    _ensure_database()
+
+
+# ── Generic upsert helper ────────────────────────────────────────────────────
+def _upsert(table: str, data: dict, json_fields: set | None = None):
+    """Insert or replace a row in the given table. Returns the data dict."""
+    db = _get_db()
+    # Serialize JSON fields
+    row = dict(data)
+    if json_fields:
+        for f in json_fields:
+            if f in row and not isinstance(row[f], str):
+                row[f] = _json_dumps(row[f])
+
+    # Get column names the table actually has
+    cursor = db.execute(f"PRAGMA table_info({table})")
+    valid_cols = {r["name"] for r in cursor.fetchall()}
+
+    # Filter to only known columns
+    cols = [k for k in row if k in valid_cols]
+    vals = [row[k] for k in cols]
+
+    placeholders = ",".join(["?"] * len(cols))
+    col_names = ",".join(cols)
+    updates = ",".join([f"{c}=excluded.{c}" for c in cols if c != "id"])
+
+    db.execute(
+        f"INSERT INTO {table} ({col_names}) VALUES ({placeholders}) "
+        f"ON CONFLICT(id) DO UPDATE SET {updates}",
+        vals
+    )
+    db.commit()
+    return data
+
+
+def _get_all(table: str, json_fields: set | None = None,
+             where: str = "", params: tuple = ()) -> list:
+    db = _get_db()
+    sql = f"SELECT * FROM {table}"
+    if where:
+        sql += f" WHERE {where}"
+    return _rows_to_list(db.execute(sql, params), json_fields)
+
+
+def _get_one(table: str, pk: str, json_fields: set | None = None) -> dict | None:
+    db = _get_db()
+    row = db.execute(f"SELECT * FROM {table} WHERE id=?", (pk,)).fetchone()
+    return _row_to_dict(row, json_fields)
+
+
+def _delete(table: str, pk: str):
+    db = _get_db()
+    db.execute(f"DELETE FROM {table} WHERE id=?", (pk,))
+    db.commit()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # USERS
 # ═══════════════════════════════════════════════════════════════════════════
 def get_all_users():
-    return _read_json(USERS_FILE)
+    return _get_all("users")
 
 def get_user(user_id):
-    for u in get_all_users():
-        if u.get("id") == user_id:
-            return u
-    return None
+    return _get_one("users", user_id)
 
 def get_user_by_username(username):
-    for u in get_all_users():
-        if u.get("username") == username:
-            return u
-    return None
+    db = _get_db()
+    row = db.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+    return _row_to_dict(row)
 
 def save_user(user):
-    users = get_all_users()
-    idx = next((i for i, u in enumerate(users) if u.get("id") == user.get("id")), None)
-    if idx is not None:
-        users[idx] = user
-    else:
-        if not user.get("id"):
-            user["id"] = str(uuid.uuid4())
-        users.append(user)
-    _write_json(USERS_FILE, users)
+    if not user.get("id"):
+        user["id"] = str(uuid.uuid4())
+    if not user.get("created_at"):
+        user["created_at"] = datetime.now(timezone.utc).isoformat()
+    _upsert("users", user)
     return user
 
 def delete_user(user_id):
-    users = [u for u in get_all_users() if u.get("id") != user_id]
-    _write_json(USERS_FILE, users)
+    _delete("users", user_id)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # MEMBERS
 # ═══════════════════════════════════════════════════════════════════════════
 def get_all_members():
-    return _read_json(MEMBERS_FILE)
+    return _get_all("members", _JSON_FIELDS_MEMBERS)
 
 def get_member(member_id):
-    for m in get_all_members():
-        if m.get("id") == member_id:
-            return m
-    return None
+    return _get_one("members", member_id, _JSON_FIELDS_MEMBERS)
 
 def get_member_by_user_id(user_id):
-    for m in get_all_members():
-        if m.get("user_id") == user_id:
-            return m
-    return None
+    db = _get_db()
+    row = db.execute("SELECT * FROM members WHERE user_id=?", (user_id,)).fetchone()
+    return _row_to_dict(row, _JSON_FIELDS_MEMBERS)
 
 def save_member(member):
-    members = get_all_members()
-    idx = next((i for i, m in enumerate(members) if m.get("id") == member.get("id")), None)
-    if idx is not None:
-        members[idx] = member
-    else:
-        if not member.get("id"):
-            member["id"] = str(uuid.uuid4())
-        members.append(member)
-    _write_json(MEMBERS_FILE, members)
+    if not member.get("id"):
+        member["id"] = str(uuid.uuid4())
+    if not member.get("created_at"):
+        member["created_at"] = datetime.now(timezone.utc).isoformat()
+    _upsert("members", member, _JSON_FIELDS_MEMBERS)
     return member
 
 def delete_member(member_id):
-    members = [m for m in get_all_members() if m.get("id") != member_id]
-    _write_json(MEMBERS_FILE, members)
+    _delete("members", member_id)
 
 def get_available_members_for_service(service_id):
     results = []
@@ -193,13 +483,18 @@ def decrement_member_load(member_id):
 # SERVICES
 # ═══════════════════════════════════════════════════════════════════════════
 def get_all_services():
-    return _read_json(SERVICES_FILE)
+    rows = _get_all("services")
+    # Deserialize channels stored as JSON string
+    for s in rows:
+        if isinstance(s.get("channels"), str):
+            s["channels"] = _json_loads(s["channels"], [])
+    return rows
 
 def get_service(service_id):
-    for s in get_all_services():
-        if s.get("id") == service_id:
-            return s
-    return None
+    s = _get_one("services", service_id)
+    if s and isinstance(s.get("channels"), str):
+        s["channels"] = _json_loads(s["channels"], [])
+    return s
 
 def get_services_for_channel(channel):
     """Get services available for a specific channel (supports multi-channel services)."""
@@ -211,15 +506,12 @@ def get_services_for_channel(channel):
     return results
 
 def save_service(service):
-    services = get_all_services()
-    idx = next((i for i, s in enumerate(services) if s.get("id") == service.get("id")), None)
-    if idx is not None:
-        services[idx] = service
-    else:
-        if not service.get("id"):
-            service["id"] = str(uuid.uuid4())
-        services.append(service)
-    _write_json(SERVICES_FILE, services)
+    if not service.get("id"):
+        service["id"] = str(uuid.uuid4())
+    row = dict(service)
+    if "channels" in row and not isinstance(row["channels"], str):
+        row["channels"] = _json_dumps(row["channels"])
+    _upsert("services", row)
     return service
 
 
@@ -227,91 +519,75 @@ def save_service(service):
 # REQUESTS
 # ═══════════════════════════════════════════════════════════════════════════
 def get_all_active_requests():
-    return _read_json(ACTIVE_REQUESTS_FILE)
+    return _get_all("requests", _JSON_FIELDS_REQUESTS, "archived=0")
 
 def get_all_archived_requests():
-    return _read_json(ARCHIVED_REQUESTS_FILE)
+    return _get_all("requests", _JSON_FIELDS_REQUESTS, "archived=1")
 
 def get_request(request_id):
-    for r in get_all_active_requests():
-        if r.get("id") == request_id:
-            return r
-    for r in get_all_archived_requests():
-        if r.get("id") == request_id:
-            return r
-    return None
+    return _get_one("requests", request_id, _JSON_FIELDS_REQUESTS)
 
 def save_request(request):
-    requests = get_all_active_requests()
-    idx = next((i for i, r in enumerate(requests) if r.get("id") == request.get("id")), None)
-    if idx is not None:
-        requests[idx] = request
-    else:
-        if not request.get("id"):
-            request["id"] = str(uuid.uuid4())
-        if not request.get("created_at"):
-            request["created_at"] = datetime.now(timezone.utc).isoformat()
-        requests.append(request)
-    _write_json(ACTIVE_REQUESTS_FILE, requests)
+    if not request.get("id"):
+        request["id"] = str(uuid.uuid4())
+    if not request.get("created_at"):
+        request["created_at"] = datetime.now(timezone.utc).isoformat()
+    if "archived" not in request:
+        request["archived"] = 0
+    _upsert("requests", request, _JSON_FIELDS_REQUESTS)
     return request
 
 def archive_request(request_id):
-    actives = get_all_active_requests()
-    req = None
-    remaining = []
-    for r in actives:
-        if r.get("id") == request_id:
-            req = r
-        else:
-            remaining.append(r)
-    if req:
-        req["archived_at"] = datetime.now(timezone.utc).isoformat()
-        archived = get_all_archived_requests()
-        archived.append(req)
-        _write_json(ACTIVE_REQUESTS_FILE, remaining)
-        _write_json(ARCHIVED_REQUESTS_FILE, archived)
+    req = get_request(request_id)
+    if not req:
+        return None
+    req["archived"] = 1
+    req["archived_at"] = datetime.now(timezone.utc).isoformat()
+    save_request(req)
     return req
 
 def get_requests_by_channel(channel):
-    return [r for r in get_all_active_requests() if r.get("channel") == channel]
+    return _get_all("requests", _JSON_FIELDS_REQUESTS,
+                     "archived=0 AND channel=?", (channel,))
 
 def get_requests_by_user(user_id):
-    return [r for r in get_all_active_requests()
-            if r.get("requester_id") == user_id or r.get("client_id") == user_id]
+    return _get_all("requests", _JSON_FIELDS_REQUESTS,
+                     "archived=0 AND (requester_id=? OR client_id=?)",
+                     (user_id, user_id))
 
 def get_requests_by_member(member_id):
-    return [r for r in get_all_active_requests() if r.get("assigned_to") == member_id]
+    return _get_all("requests", _JSON_FIELDS_REQUESTS,
+                     "archived=0 AND assigned_to=?", (member_id,))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # INVOICES
 # ═══════════════════════════════════════════════════════════════════════════
 def get_all_invoices():
-    return _read_json(INVOICES_FILE)
+    return _get_all("invoices", _JSON_FIELDS_INVOICES)
 
 def get_invoice(invoice_id):
-    for inv in get_all_invoices():
-        if inv.get("id") == invoice_id:
-            return inv
-    return None
+    return _get_one("invoices", invoice_id, _JSON_FIELDS_INVOICES)
 
 def save_invoice(invoice):
-    invoices = get_all_invoices()
-    idx = next((i for i, inv in enumerate(invoices) if inv.get("id") == invoice.get("id")), None)
-    if idx is not None:
-        invoices[idx] = invoice
-    else:
-        if not invoice.get("id"):
-            invoice["id"] = str(uuid.uuid4())
-        invoices.append(invoice)
-    _write_json(INVOICES_FILE, invoices)
+    if not invoice.get("id"):
+        invoice["id"] = str(uuid.uuid4())
+    if not invoice.get("created_at"):
+        invoice["created_at"] = datetime.now(timezone.utc).isoformat()
+    _upsert("invoices", invoice, _JSON_FIELDS_INVOICES)
     return invoice
 
 def get_next_invoice_number():
-    seq = _read_json_obj(INVOICE_SEQUENCE_FILE)
-    last = seq.get("last", 0) + 1
-    seq["last"] = last
-    _write_json_obj(INVOICE_SEQUENCE_FILE, seq)
+    db = _get_db()
+    db.execute(
+        "INSERT INTO sequences (key, value) VALUES (?, 0) "
+        "ON CONFLICT(key) DO NOTHING",
+        ("invoice_last",)
+    )
+    db.execute("UPDATE sequences SET value = value + 1 WHERE key=?", ("invoice_last",))
+    row = db.execute("SELECT value FROM sequences WHERE key=?", ("invoice_last",)).fetchone()
+    db.commit()
+    last = row["value"] if row else 1
     year = datetime.now().year
     return f"{config.INVOICE_PREFIX}-{year}-{last:04d}"
 
@@ -320,16 +596,14 @@ def get_next_invoice_number():
 # AUDIT LOGS
 # ═══════════════════════════════════════════════════════════════════════════
 def get_all_audit_logs():
-    return _read_json(AUDIT_LOGS_FILE)
+    return _get_all("audit_logs", _JSON_FIELDS_AUDIT)
 
 def save_audit_log(entry):
-    logs = get_all_audit_logs()
     if not entry.get("id"):
         entry["id"] = str(uuid.uuid4())
     if not entry.get("timestamp"):
         entry["timestamp"] = datetime.now(timezone.utc).isoformat()
-    logs.append(entry)
-    _write_json(AUDIT_LOGS_FILE, logs)
+    _upsert("audit_logs", entry, _JSON_FIELDS_AUDIT)
     return entry
 
 
@@ -337,44 +611,38 @@ def save_audit_log(entry):
 # NOTIFICATIONS
 # ═══════════════════════════════════════════════════════════════════════════
 def get_all_notifications():
-    return _read_json(NOTIFICATIONS_FILE)
+    return _get_all("notifications")
 
 def create_notification(notification):
-    notifs = get_all_notifications()
     if not notification.get("id"):
         notification["id"] = str(uuid.uuid4())
     notification["created_at"] = datetime.now(timezone.utc).isoformat()
     notification["read"] = False
-    notifs.append(notification)
-    _write_json(NOTIFICATIONS_FILE, notifs)
+    _upsert("notifications", notification)
     return notification
 
 def get_notifications_for_user(user_id):
+    user = get_user(user_id)
+    user_role = (user or {}).get("role", "")
     return [n for n in get_all_notifications()
-            if n.get("user_id") == user_id or n.get("role") in (
-                get_user(user_id) or {}).get("role", "")]
+            if n.get("user_id") == user_id or n.get("role") == user_role]
 
 def mark_notification_read(notif_id):
-    notifs = get_all_notifications()
-    for n in notifs:
-        if n.get("id") == notif_id:
-            n["read"] = True
-            break
-    _write_json(NOTIFICATIONS_FILE, notifs)
+    db = _get_db()
+    db.execute("UPDATE notifications SET read=1 WHERE id=?", (notif_id,))
+    db.commit()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # DOCUMENTS
 # ═══════════════════════════════════════════════════════════════════════════
 def get_all_documents():
-    return _read_json(DOCUMENTS_FILE)
+    return _get_all("documents")
 
 def save_document(doc):
-    docs = get_all_documents()
     if not doc.get("id"):
         doc["id"] = str(uuid.uuid4())
-    docs.append(doc)
-    _write_json(DOCUMENTS_FILE, docs)
+    _upsert("documents", doc)
     return doc
 
 
@@ -385,35 +653,57 @@ def backup_all():
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_dir = os.path.join(config.BACKUPS_DIR, ts)
     os.makedirs(backup_dir, exist_ok=True)
-    for path in ALL_DATA_FILES:
-        if os.path.exists(path):
-            shutil.copy2(path, os.path.join(backup_dir, os.path.basename(path)))
+    if os.path.exists(config.DATABASE_FILE):
+        # Use SQLite backup API for safe copy
+        dst_path = os.path.join(backup_dir, "plagenor.db")
+        src = _get_db()
+        dst = sqlite3.connect(dst_path)
+        src.backup(dst)
+        dst.close()
     return backup_dir
 
 def get_platform_stats():
-    active = get_all_active_requests()
-    archived = get_all_archived_requests()
-    members = get_all_members()
-    users = get_all_users()
-    invoices = get_all_invoices()
+    """Use efficient SQL aggregation instead of loading all records."""
+    db = _get_db()
 
-    ibtikar_active   = [r for r in active if r.get("channel") == config.CHANNEL_IBTIKAR]
-    genoclab_active  = [r for r in active if r.get("channel") == config.CHANNEL_GENOCLAB]
-    completed        = [r for r in active + archived if r.get("status") == "COMPLETED"]
+    r = db.execute("SELECT COUNT(*) as c FROM requests WHERE archived=0").fetchone()
+    total_requests = r["c"]
+    r = db.execute("SELECT COUNT(*) as c FROM requests WHERE archived=1").fetchone()
+    total_archived = r["c"]
+    r = db.execute("SELECT COUNT(*) as c FROM requests WHERE archived=0 AND channel=?",
+                   (config.CHANNEL_IBTIKAR,)).fetchone()
+    ibtikar_active = r["c"]
+    r = db.execute("SELECT COUNT(*) as c FROM requests WHERE archived=0 AND channel=?",
+                   (config.CHANNEL_GENOCLAB,)).fetchone()
+    genoclab_active = r["c"]
+    r = db.execute("SELECT COUNT(*) as c FROM requests WHERE status='COMPLETED'").fetchone()
+    completed = r["c"]
+    r = db.execute("SELECT COUNT(*) as c FROM members").fetchone()
+    total_members = r["c"]
+    r = db.execute("SELECT COUNT(*) as c FROM users").fetchone()
+    total_users = r["c"]
+    r = db.execute("SELECT COUNT(*) as c FROM invoices").fetchone()
+    total_invoices = r["c"]
+    r = db.execute("SELECT COALESCE(SUM(total_ttc),0) as s FROM invoices").fetchone()
+    total_revenue = r["s"]
 
-    total_revenue = sum(inv.get("total_ttc", 0) for inv in invoices)
-    ibtikar_budget = sum(r.get("budget_amount", 0) for r in ibtikar_active
-                         if r.get("status") not in config.REJECTION_STATES)
+    rejection_list = ",".join(f"'{s}'" for s in config.REJECTION_STATES)
+    r = db.execute(
+        f"SELECT COALESCE(SUM(budget_amount),0) as s FROM requests "
+        f"WHERE archived=0 AND channel=? AND status NOT IN ({rejection_list})",
+        (config.CHANNEL_IBTIKAR,)
+    ).fetchone()
+    ibtikar_budget = r["s"]
 
     return {
-        "total_requests": len(active),
-        "total_archived": len(archived),
-        "ibtikar_active": len(ibtikar_active),
-        "genoclab_active": len(genoclab_active),
-        "completed": len(completed),
-        "total_members": len(members),
-        "total_users": len(users),
-        "total_invoices": len(invoices),
+        "total_requests": total_requests,
+        "total_archived": total_archived,
+        "ibtikar_active": ibtikar_active,
+        "genoclab_active": genoclab_active,
+        "completed": completed,
+        "total_members": total_members,
+        "total_users": total_users,
+        "total_invoices": total_invoices,
         "total_revenue": total_revenue,
         "ibtikar_budget_used": ibtikar_budget,
         "ibtikar_budget_cap": config.IBTIKAR_BUDGET_CAP,
@@ -428,26 +718,20 @@ def get_request_by_guest_token(token):
     """Find a request by its guest tracking token."""
     if not token:
         return None
-    for r in get_all_active_requests():
-        if r.get("guest_token") == token:
-            if r.get("guest_token_expires_at"):
-                try:
-                    expires = datetime.fromisoformat(r["guest_token_expires_at"])
-                    if datetime.now(timezone.utc) > expires:
-                        continue  # Token expired, skip
-                except Exception:
-                    pass
-            return r
-    for r in get_all_archived_requests():
-        if r.get("guest_token") == token:
-            if r.get("guest_token_expires_at"):
-                try:
-                    expires = datetime.fromisoformat(r["guest_token_expires_at"])
-                    if datetime.now(timezone.utc) > expires:
-                        continue  # Token expired, skip
-                except Exception:
-                    pass
-            return r
+    db = _get_db()
+    rows = db.execute(
+        "SELECT * FROM requests WHERE guest_token=? ORDER BY archived ASC", (token,)
+    ).fetchall()
+    for row in rows:
+        r = _row_to_dict(row, _JSON_FIELDS_REQUESTS)
+        if r and r.get("guest_token_expires_at"):
+            try:
+                expires = datetime.fromisoformat(r["guest_token_expires_at"])
+                if datetime.now(timezone.utc) > expires:
+                    continue
+            except Exception:
+                pass
+        return r
     return None
 
 
@@ -455,48 +739,36 @@ def get_requests_by_guest_email(email):
     """Find all requests submitted by a guest email (for account upgrade)."""
     if not email:
         return []
-    results = []
-    for r in get_all_active_requests() + get_all_archived_requests():
-        if r.get("submitted_as_guest") and r.get("guest_email", "").lower() == email.lower():
-            results.append(r)
-    return results
+    db = _get_db()
+    rows = db.execute(
+        "SELECT * FROM requests WHERE submitted_as_guest=1 AND LOWER(guest_email)=LOWER(?)",
+        (email,)
+    ).fetchall()
+    return [_row_to_dict(r, _JSON_FIELDS_REQUESTS) for r in rows]
 
 
 def link_guest_requests_to_client(email, client_id):
     """Link all guest submissions to a new CLIENT account."""
-    requests = get_all_active_requests()
-    updated = 0
-    for r in requests:
-        if r.get("submitted_as_guest") and r.get("guest_email", "").lower() == email.lower():
-            r["client_id"] = client_id
-            r["requester_id"] = client_id
-            r["guest_upgraded"] = True
-            updated += 1
-    if updated:
-        _write_json(ACTIVE_REQUESTS_FILE, requests)
-    return updated
+    db = _get_db()
+    cursor = db.execute(
+        "UPDATE requests SET client_id=?, requester_id=?, guest_upgraded=1 "
+        "WHERE submitted_as_guest=1 AND LOWER(guest_email)=LOWER(?) AND archived=0",
+        (client_id, client_id, email)
+    )
+    db.commit()
+    return cursor.rowcount
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# OVERRIDE LOGS (separate file for permanent record)
+# OVERRIDE LOGS (separate table for permanent record)
 # ═══════════════════════════════════════════════════════════════════════════
 def get_override_logs():
-    path = config.OVERRIDE_LOG_FILE
-    if not os.path.exists(path):
-        return []
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return []
+    return _get_all("override_logs")
 
 def save_override_log(entry):
-    path = config.OVERRIDE_LOG_FILE
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    logs = get_override_logs()
-    logs.append(entry)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(logs, f, ensure_ascii=False, indent=2, default=str)
+    if not entry.get("id"):
+        entry["id"] = str(uuid.uuid4())
+    _upsert("override_logs", entry)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -506,11 +778,16 @@ def generate_request_id(channel: str) -> str:
     """Generate a human-readable request ID like IBK-2026-0001 or GCL-2026-0001."""
     prefix = "IBK" if channel == config.CHANNEL_IBTIKAR else "GCL"
     year = datetime.now().year
-    seq = _read_json_obj(REQUEST_SEQUENCE_FILE)
     key = f"{prefix}_{year}"
-    last = seq.get(key, 0) + 1
-    seq[key] = last
-    _write_json_obj(REQUEST_SEQUENCE_FILE, seq)
+    db = _get_db()
+    db.execute(
+        "INSERT INTO sequences (key, value) VALUES (?, 0) ON CONFLICT(key) DO NOTHING",
+        (key,)
+    )
+    db.execute("UPDATE sequences SET value = value + 1 WHERE key=?", (key,))
+    row = db.execute("SELECT value FROM sequences WHERE key=?", (key,)).fetchone()
+    db.commit()
+    last = row["value"] if row else 1
     return f"{prefix}-{year}-{last:04d}"
 
 
@@ -518,8 +795,7 @@ def generate_request_id(channel: str) -> str:
 # DELETE SERVICE
 # ═══════════════════════════════════════════════════════════════════════════
 def delete_service(service_id: str):
-    services = [s for s in get_all_services() if s.get("id") != service_id]
-    _write_json(SERVICES_FILE, services)
+    _delete("services", service_id)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -605,50 +881,32 @@ def get_request_comments(request_id: str) -> list:
 # PAYMENT METHODS
 # ═══════════════════════════════════════════════════════════════════════════
 def get_payment_methods() -> list:
-    path = config.PAYMENT_METHODS_FILE
-    if not os.path.exists(path):
+    db = _get_db()
+    rows = db.execute("SELECT name FROM payment_methods WHERE active=1 ORDER BY id").fetchall()
+    if not rows:
         return list(config.DEFAULT_PAYMENT_METHODS)
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, list) else list(config.DEFAULT_PAYMENT_METHODS)
-    except Exception:
-        return list(config.DEFAULT_PAYMENT_METHODS)
+    return [r["name"] for r in rows]
 
 
 def save_payment_methods(methods: list):
-    path = config.PAYMENT_METHODS_FILE
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(methods, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
+    db = _get_db()
+    db.execute("DELETE FROM payment_methods")
+    for name in methods:
+        db.execute("INSERT OR IGNORE INTO payment_methods (name) VALUES (?)", (name,))
+    db.commit()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # REVENUE ARCHIVES
 # ═══════════════════════════════════════════════════════════════════════════
 def get_revenue_archives() -> list:
-    path = REVENUE_ARCHIVES_FILE
-    if not os.path.exists(path):
-        return []
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, list) else []
-    except Exception:
-        return []
+    return _get_all("revenue_archives")
 
 
 def save_revenue_archive(archive: dict):
-    path = REVENUE_ARCHIVES_FILE
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    archives = get_revenue_archives()
-    archives.append(archive)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(archives, f, ensure_ascii=False, indent=2, default=str)
-    os.replace(tmp, path)
+    if not archive.get("id"):
+        archive["id"] = str(uuid.uuid4())
+    _upsert("revenue_archives", archive)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

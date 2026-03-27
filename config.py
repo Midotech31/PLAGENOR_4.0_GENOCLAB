@@ -85,6 +85,7 @@ AUDIT_LOGS_FILE        = _os.path.join(DATA_DIR, "audit_logs.json")
 DOCUMENTS_FILE         = _os.path.join(DATA_DIR, "documents.json")
 NOTIFICATIONS_FILE     = _os.path.join(DATA_DIR, "notifications.json")
 OVERRIDE_LOG_FILE      = _os.path.join(DATA_DIR, "override_logs.json")
+DATABASE_FILE          = _os.path.join(DATA_DIR, "plagenor.db")
 
 UPLOADS_DIR  = _os.path.join(DATA_DIR, "uploads")
 REPORTS_DIR  = _os.path.join(DATA_DIR, "reports")

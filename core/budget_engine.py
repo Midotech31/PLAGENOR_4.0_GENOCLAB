@@ -3,7 +3,7 @@
 # SUPER_ADMIN override with mandatory justification.
 
 from __future__ import annotations
-import json, os, uuid
+import os, uuid
 from datetime import datetime, timezone
 from typing import Optional
 import config
@@ -114,32 +114,15 @@ def approve_with_override(request_id: str, actor: dict, amount: float,
 
 
 def _save_override_log(entry: dict):
-    """Append to override_logs.json (permanent record)."""
-    path = config.OVERRIDE_LOG_FILE
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    try:
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
-                logs = json.load(f)
-        else:
-            logs = []
-    except Exception:
-        logs = []
-    logs.append(entry)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(logs, f, ensure_ascii=False, indent=2, default=str)
+    """Save override log to SQLite via repository."""
+    from core.repository import save_override_log
+    save_override_log(entry)
 
 
 def get_override_logs() -> list:
-    """Read all override logs."""
-    path = config.OVERRIDE_LOG_FILE
-    if not os.path.exists(path):
-        return []
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return []
+    """Read all override logs from SQLite."""
+    from core.repository import get_override_logs as _repo_get_overrides
+    return _repo_get_overrides()
 
 
 def get_budget_status(requester_id: str = "") -> dict:
