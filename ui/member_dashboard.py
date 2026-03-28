@@ -13,8 +13,9 @@ from ui.shared_components import (
 from core.repository import (
     get_all_active_requests, get_all_archived_requests,
     get_member_by_user_id, get_requests_by_member, save_request,
-    get_member_points, add_comment_to_request,
+    get_member_points, add_comment_to_request, save_member,
 )
+from utils.qrcode_gen import generate_qr_html
 from core.workflow_engine import transition, get_allowed_transitions
 from core.productivity_engine import compute_member_productivity
 from services.notification_service import get_user_notifications, get_unread_count
@@ -70,6 +71,45 @@ def _render_member_dashboard_inner(user):
                 render_request_card(req)
                 with st.expander(f"🔧 — {req.get('title','')[:40]}"):
                     render_workflow_progress(req)
+                    # ── Accept / Decline assignment ──
+                    if req.get("status") == "ASSIGNED" and not req.get("assignment_accepted") and not req.get("assignment_declined"):
+                        st.markdown("##### 📋 Accepter ou décliner l'assignation")
+                        ac1, ac2 = st.columns(2)
+                        with ac1:
+                            if st.button("✅ Accepter", key=f"m_accept_{req['id']}", type="primary"):
+                                req["assignment_accepted"] = True
+                                req["assignment_accepted_at"] = datetime.now(timezone.utc).isoformat()
+                                save_request(req)
+                                st.success("✅ Assignation acceptée"); st.rerun()
+                        with ac2:
+                            decline_reason = st.text_input("Raison du refus", key=f"m_decline_r_{req['id']}")
+                            if st.button("❌ Décliner", key=f"m_decline_{req['id']}"):
+                                if decline_reason.strip():
+                                    req["assignment_declined"] = True
+                                    req["assignment_decline_reason"] = decline_reason.strip()
+                                    save_request(req)
+                                    st.warning("❌ Assignation déclinée"); st.rerun()
+                                else:
+                                    st.warning("Raison obligatoire")
+                        st.markdown("---")
+                    # ── Appointment proposal (after accepted, no appointment yet) ──
+                    if req.get("assignment_accepted") and not req.get("appointment_date"):
+                        st.markdown("##### 📅 Proposer un rendez-vous")
+                        appt_date = st.date_input("Date du rendez-vous", key=f"m_appt_{req['id']}")
+                        if st.button("📅 Proposer", key=f"m_appt_btn_{req['id']}"):
+                            req["appointment_date"] = str(appt_date)
+                            req["appointment_proposed_by"] = user.get("id", "")
+                            save_request(req)
+                            st.success(f"📅 Rendez-vous proposé: {appt_date}"); st.rerun()
+                        st.markdown("---")
+                    elif req.get("appointment_date"):
+                        appt_confirmed = "✅" if req.get("appointment_confirmed") else "⏳"
+                        st.info(f"📅 Rendez-vous: {req['appointment_date']} {appt_confirmed}")
+                    # ── QR Code ──
+                    qr_data = f"PLAGENOR-REQ:{req.get('display_id') or req.get('id','')}"
+                    st.markdown(generate_qr_html(qr_data, size=120), unsafe_allow_html=True)
+                    st.markdown("---")
+                    # ── Workflow transitions ──
                     allowed = get_allowed_transitions(req)
                     member_ok = {s for s in allowed if s in ("ANALYSIS_STARTED","ANALYSIS_FINISHED","SAMPLE_RECEIVED","REPORT_UPLOADED","REPORT_VALIDATED")}
                     if member_ok:
@@ -161,6 +201,19 @@ def _render_member_dashboard_inner(user):
                 render_kpi_card("⭐", points_data["total_points"], "Points totaux", "orange")
             with c2:
                 render_kpi_card("💬", len(points_data["cheers"]), "Encouragements", "teal")
+            st.markdown("<br/>", unsafe_allow_html=True)
+            # Progress bar to 100 points
+            total_pts = points_data["total_points"]
+            render_progress_bar(min(total_pts, 100), 100, "orange", f"Progression: {total_pts}/100 pts")
+            # Gift box
+            if member and member.get("gift_unlocked"):
+                st.markdown('<div style="padding:16px;background:#FFFDE7;border-radius:12px;border:1px solid #F9A825;margin:12px 0;text-align:center">'
+                            '<span style="font-size:48px">🎁</span><br/>'
+                            '<strong style="color:#F57F17;font-size:18px">Félicitations ! Vous avez débloqué une récompense !</strong><br/>'
+                            '<span style="color:#795548">Contactez votre administrateur pour récupérer votre cadeau.</span></div>',
+                            unsafe_allow_html=True)
+                if member.get("gift_image"):
+                    st.image(member["gift_image"], caption="Votre récompense", width=200)
             st.markdown("<br/>", unsafe_allow_html=True)
             if points_data["points_history"]:
                 section_header("Historique des points","⭐")

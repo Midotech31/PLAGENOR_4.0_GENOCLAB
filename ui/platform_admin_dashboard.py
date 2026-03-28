@@ -16,7 +16,7 @@ from core.repository import (
     get_all_active_requests, get_all_members, get_all_services,
     get_request, save_request, get_platform_stats, get_all_invoices,
     get_all_documents, add_points_to_member, add_cheer_to_member,
-    add_comment_to_request,
+    add_comment_to_request, get_member, save_member,
 )
 from core.workflow_engine import transition, get_allowed_transitions
 from core.assignment_engine import get_recommended_members
@@ -92,6 +92,23 @@ def _pending(user):
                 if req.get("pricing"):
                     p = req["pricing"]
                     st.write(f"**Prix calculé:** {format_price(p.get('total',0))}")
+
+            # ── APPOINTMENT STATUS ──
+            if req.get("appointment_date"):
+                appt_confirmed = "✅ Confirmé" if req.get("appointment_confirmed") else "⏳ En attente"
+                st.info(f"📅 Rendez-vous: {req['appointment_date']} — {appt_confirmed}")
+                if not req.get("appointment_confirmed"):
+                    if st.button("✅ Confirmer le rendez-vous", key=f"pa_appt_confirm_{req['id']}"):
+                        req["appointment_confirmed"] = True
+                        req["appointment_confirmed_at"] = datetime.now(timezone.utc).isoformat()
+                        save_request(req)
+                        st.success("✅ Rendez-vous confirmé"); st.rerun()
+            # ── Assignment status ──
+            if req.get("status") == "ASSIGNED":
+                if req.get("assignment_accepted"):
+                    st.success(f"✅ Assignation acceptée le {fmt_datetime(req.get('assignment_accepted_at',''))}")
+                elif req.get("assignment_declined"):
+                    st.error(f"❌ Assignation déclinée — Raison: {req.get('assignment_decline_reason','')}")
 
             # ── PRICE REVIEW (admin can modify) ──
             st.markdown("---")
@@ -318,9 +335,16 @@ def _assignment(user):
         pts_reason = st.text_input("Raison", key="pa_pts_reason", placeholder="Ex: Excellent travail sur le séquençage")
         if st.button("⭐ Attribuer", key="pa_pts_btn", type="primary"):
             if pts_reason.strip():
-                add_points_to_member(mid, pts, pts_reason.strip(), user)
+                updated_m = add_points_to_member(mid, pts, pts_reason.strip(), user)
                 log_action("POINTS_AWARDED","MEMBER",mid,actor=user,details={"points":pts,"reason":pts_reason})
-                st.success(f"✅ {pts} points attribués!"); st.rerun()
+                # Check if gift should be unlocked
+                if updated_m and updated_m.get("total_points", 0) >= 100 and not updated_m.get("gift_unlocked"):
+                    updated_m["gift_unlocked"] = True
+                    save_member(updated_m)
+                    st.balloons()
+                    st.success(f"✅ {pts} points attribués! 🎁 Récompense débloquée!"); st.rerun()
+                else:
+                    st.success(f"✅ {pts} points attribués!"); st.rerun()
             else:
                 st.warning("Raison obligatoire")
     with c2:
@@ -333,6 +357,27 @@ def _assignment(user):
                 st.success("✅ Encouragement envoyé!"); st.rerun()
             else:
                 st.warning("Message obligatoire")
+    # ── Gift image upload ──
+    st.markdown("---")
+    section_header("Récompense (Cadeau)", "🎁")
+    sel_member = get_member(mid) if mid else None
+    if sel_member:
+        if sel_member.get("gift_unlocked"):
+            st.success(f"🎁 Récompense débloquée pour cet analyste ({sel_member.get('total_points',0)} pts)")
+            gift_img = st.file_uploader("📷 Image du cadeau", key="pa_gift_img", type=["png","jpg","jpeg","gif"])
+            if gift_img:
+                import os
+                gift_path = os.path.join(config.DATA_DIR, f"gift_{mid[:8]}_{gift_img.name}")
+                with open(gift_path, "wb") as f:
+                    f.write(gift_img.getbuffer())
+                sel_member["gift_image"] = gift_path
+                save_member(sel_member)
+                st.success("✅ Image du cadeau enregistrée")
+            if sel_member.get("gift_image"):
+                st.image(sel_member["gift_image"], caption="Cadeau actuel", width=200)
+        else:
+            remaining = 100 - sel_member.get("total_points", 0)
+            st.info(f"⏳ Encore {remaining} points avant le déverrouillage de la récompense")
 
 def _budget():
     budget = get_budget_dashboard()

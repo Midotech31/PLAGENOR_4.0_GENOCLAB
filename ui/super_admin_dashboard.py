@@ -22,6 +22,7 @@ from core.repository import (
     get_all_documents, get_all_notifications,
     get_platform_stats, backup_all,
     get_payment_methods, save_payment_methods,
+    get_all_techniques, save_technique, delete_technique,
 )
 from core.audit_engine import safe_get_all_audit_logs, log_action
 from core.workflow_engine import transition, force_transition, get_allowed_transitions
@@ -279,6 +280,53 @@ def _tab_members(user):
             if st.button("⏸️" if m.get("available",True) else "▶️", key=f"tm_{m['id']}"):
                 m["available"] = not m.get("available",True); save_member(m); st.rerun()
         st.markdown("<div style='border-bottom:1px solid #f0f2f6'></div>", unsafe_allow_html=True)
+
+    # ── Technique Management ──
+    st.markdown("---")
+    section_header("Gestion des Techniques", "🧪")
+    techniques = get_all_techniques()
+    if techniques:
+        for tech in techniques:
+            tc1, tc2, tc3, tc4 = st.columns([3, 2, 2, 1])
+            with tc1:
+                st.markdown(f"**{tech.get('name', '')}**")
+            with tc2:
+                st.write(tech.get("category", "") or "—")
+            with tc3:
+                st.write(fmt_date(tech.get("created_at", "")))
+            with tc4:
+                if st.button("🗑️", key=f"del_tech_{tech['id']}"):
+                    delete_technique(tech["id"])
+                    log_action("TECHNIQUE_DELETED", "TECHNIQUE", tech["id"], actor=user,
+                              details={"name": tech.get("name", "")})
+                    st.success(f"🗑️ Technique supprimée"); st.rerun()
+            st.markdown("<div style='border-bottom:1px solid #f0f2f6'></div>", unsafe_allow_html=True)
+    else:
+        render_empty_state("🧪", "Aucune technique enregistrée")
+    st.markdown("##### ➕ Ajouter une technique")
+    with st.form("add_technique_form", clear_on_submit=True):
+        tc1, tc2 = st.columns(2)
+        with tc1:
+            tech_name = st.text_input("Nom de la technique *", key="tech_name")
+        with tc2:
+            tech_category = st.text_input("Catégorie", key="tech_category",
+                                          placeholder="Ex: Séquençage, Extraction, PCR")
+        if st.form_submit_button("✅ Ajouter", type="primary"):
+            if tech_name.strip():
+                existing_names = [t.get("name", "").lower() for t in techniques]
+                if tech_name.strip().lower() in existing_names:
+                    st.error("❌ Cette technique existe déjà")
+                else:
+                    new_tech = save_technique({
+                        "name": tech_name.strip(),
+                        "category": tech_category.strip(),
+                        "active": True,
+                    })
+                    log_action("TECHNIQUE_CREATED", "TECHNIQUE", new_tech["id"], actor=user,
+                              details={"name": tech_name.strip()})
+                    st.success(f"✅ Technique '{tech_name.strip()}' ajoutée"); st.rerun()
+            else:
+                st.warning("Nom obligatoire")
 
 def _tab_services(user):
     services = get_all_services()

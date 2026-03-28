@@ -84,7 +84,9 @@ def _row_to_dict(row: sqlite3.Row | None, json_fields: set | None = None) -> dic
     # Convert SQLite integer booleans back where appropriate
     for k in ("active", "available", "locked", "read", "archived",
               "self_registered", "receipt_confirmed", "submitted_as_guest",
-              "guest_upgraded", "price_modified"):
+              "guest_upgraded", "price_modified",
+              "appointment_confirmed", "assignment_accepted", "assignment_declined",
+              "gift_unlocked", "gift_collected"):
         if k in d and d[k] is not None:
             d[k] = bool(d[k])
     if json_fields:
@@ -319,6 +321,14 @@ CREATE TABLE IF NOT EXISTS schema_version (
     version TEXT NOT NULL DEFAULT '0.0.0',
     updated_at TEXT DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS techniques (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    category TEXT DEFAULT '',
+    active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT ''
+);
 """
 
 _INDEXES_SQL = """
@@ -344,12 +354,40 @@ CREATE INDEX IF NOT EXISTS idx_requests_assigned_status ON requests(assigned_to,
 """
 
 
+_EXTRA_COLUMNS = [
+    ("requests", "appointment_proposed_by", "TEXT DEFAULT ''"),
+    ("requests", "appointment_confirmed", "INTEGER DEFAULT 0"),
+    ("requests", "appointment_confirmed_at", "TEXT DEFAULT ''"),
+    ("requests", "assignment_accepted", "INTEGER DEFAULT 0"),
+    ("requests", "assignment_accepted_at", "TEXT DEFAULT ''"),
+    ("requests", "assignment_declined", "INTEGER DEFAULT 0"),
+    ("requests", "assignment_decline_reason", "TEXT DEFAULT ''"),
+    ("members", "gift_unlocked", "INTEGER DEFAULT 0"),
+    ("members", "gift_image", "TEXT DEFAULT ''"),
+    ("members", "gift_collected", "INTEGER DEFAULT 0"),
+]
+
+
+def _ensure_extra_columns():
+    """Add missing columns to existing tables (safe for SQLite — ignores if exists)."""
+    db = _get_db()
+    for table, col, col_type in _EXTRA_COLUMNS:
+        try:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass  # Column already exists
+    db.commit()
+    # Clear column cache after adding columns
+    _TABLE_COLUMNS.clear()
+
+
 def _ensure_database():
     """Create all tables and indexes if they don't exist."""
     db = _get_db()
     db.executescript(_SCHEMA_SQL)
     db.executescript(_INDEXES_SQL)
     db.commit()
+    _ensure_extra_columns()
 
 
 def ensure_data_directory():
@@ -988,6 +1026,26 @@ def set_lockout(username: str, until: str):
         (username, until, until)
     )
     db.commit()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TECHNIQUES
+# ═══════════════════════════════════════════════════════════════════════════
+def get_all_techniques():
+    return _get_all("techniques")
+
+
+def save_technique(technique):
+    if not technique.get("id"):
+        technique["id"] = str(uuid.uuid4())
+    if not technique.get("created_at"):
+        technique["created_at"] = datetime.now(timezone.utc).isoformat()
+    _upsert("techniques", technique)
+    return technique
+
+
+def delete_technique(technique_id):
+    _delete("techniques", technique_id)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
