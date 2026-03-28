@@ -59,9 +59,14 @@ def resolve_service_name(service_id: str) -> str:
 
 # ── KPI Card ──────────────────────────────────────────────────────────────────
 def render_kpi_card(icon: str, value, label: str, color: str = "blue"):
+    color_map = {
+        "blue": "#EFF6FF", "green": "#ECFDF5", "purple": "#F5F3FF",
+        "orange": "#FFF7ED", "red": "#FEF2F2", "teal": "#F0FDFA",
+    }
+    bg = color_map.get(color, "#F8FAFC")
     st.markdown(f"""
     <div class="kpi-card {color}">
-        <span class="kpi-icon">{icon}</span>
+        <div class="kpi-icon-box" style="background:{bg}">{icon}</div>
         <div class="kpi-value">{value}</div>
         <div class="kpi-label">{label}</div>
     </div>
