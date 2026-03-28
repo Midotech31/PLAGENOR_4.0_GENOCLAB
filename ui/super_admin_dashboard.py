@@ -57,12 +57,12 @@ def _render_super_admin_dashboard_inner(user):
     stats = get_platform_stats()
     budget = get_budget_dashboard()
     c1,c2,c3,c4,c5,c6 = st.columns(6)
-    with c1: render_kpi_card("📋", stats["total_requests"], t("active"), "blue")
-    with c2: render_kpi_card("✅", stats["completed"], t("completed"), "green")
-    with c3: render_kpi_card("👥", stats["total_users"], t("users"), "purple")
-    with c4: render_kpi_card("🔬", stats["total_members"], t("analysts"), "teal")
-    with c5: render_kpi_card("🏛", stats["ibtikar_active"], t("ibtikar"), "blue")
-    with c6: render_kpi_card("🧬", stats["genoclab_active"], t("genoclab"), "teal")
+    with c1: render_kpi_card("clipboard", stats["total_requests"], t("active"), "blue")
+    with c2: render_kpi_card("check_circle", stats["completed"], t("completed"), "green")
+    with c3: render_kpi_card("users", stats["total_users"], t("users"), "purple")
+    with c4: render_kpi_card("microscope", stats["total_members"], t("analysts"), "teal")
+    with c5: render_kpi_card("flask", stats["ibtikar_active"], t("ibtikar"), "blue")
+    with c6: render_kpi_card("dna", stats["genoclab_active"], t("genoclab"), "teal")
     st.markdown("<br/>", unsafe_allow_html=True)
 
     # ── SYMMETRIC REVENUE DISPLAY: IBTIKAR (virtual) | GENOCLAB (real) ──
@@ -70,17 +70,17 @@ def _render_super_admin_dashboard_inner(user):
     gcl = budget.get("genoclab", {})
     c1, c2 = st.columns(2)
     with c1:
-        section_header(f"{t('revenue_virtual')} IBTIKAR", "🏛")
+        section_header(f"{t('revenue_virtual')} IBTIKAR", "flask")
         ca, cb, cc = st.columns(3)
-        with ca: render_kpi_card("💰", fmt_currency(ibk.get('total', 0)), t("total_revenue"), "orange")
-        with cb: render_kpi_card("📋", str(ibk.get('count', 0)), t("requests"), "blue")
-        with cc: render_kpi_card("🎓", str(ibk.get('students', 0)), t("students"), "purple")
+        with ca: render_kpi_card("dollar", fmt_currency(ibk.get('total', 0)), t("total_revenue"), "orange")
+        with cb: render_kpi_card("clipboard", str(ibk.get('count', 0)), t("requests"), "blue")
+        with cc: render_kpi_card("award", str(ibk.get('students', 0)), t("students"), "purple")
         st.markdown(f'<div style="font-size:13px;color:#64748B;margin-top:8px">ℹ️ {t("budget")} : <strong>{fmt_currency(ibk.get("budget_per_student", 200000))}</strong> {t("per_student_year")} (DGRSDT)</div>', unsafe_allow_html=True)
     with c2:
-        section_header(f"{t('revenue_real')} GENOCLAB", "🧬")
+        section_header(f"{t('revenue_real')} GENOCLAB", "dna")
         ca, cb = st.columns(2)
-        with ca: render_kpi_card("💵", fmt_currency(gcl.get('total', 0)), t("total_revenue"), "green")
-        with cb: render_kpi_card("🧾", str(gcl.get('count', 0)), t("invoices"), "teal")
+        with ca: render_kpi_card("trending_up", fmt_currency(gcl.get('total', 0)), t("total_revenue"), "green")
+        with cb: render_kpi_card("invoice", str(gcl.get('count', 0)), t("invoices"), "teal")
 
     tabs = st.tabs([f"📋 {t('requests')}",f"👥 {t('users')}",f"🔬 {t('analysts')}",f"🧪 {t('services')}",f"📝 {t('forms')}",f"💳 {t('payments')}",f"📊 {t('productivity')}",f"📄 {t('documents')}",f"📜 {t('audit')}","📝 Contenu",f"⚙️ {t('system')}"])
     with tabs[0]: _tab_requests(user)
@@ -136,7 +136,7 @@ def _tab_requests(user):
     st.markdown(f'<div style="font-size:13px;margin:8px 0 16px">📋 <strong>{len(filtered)}</strong> demande(s) · <span style="color:#1B4F72">🏛 {ibk} IBTIKAR</span> · <span style="color:#117A65">🧬 {geno} GENOCLAB</span></div>', unsafe_allow_html=True)
     render_export_button(filtered, filename="demandes_admin.csv", columns=["id","title","channel","status","created_at","service_code","assigned_to","budget_amount"])
     if not filtered:
-        render_empty_state("📭","Aucune demande trouvée"); return
+        render_empty_state("archive","Aucune demande trouvée"); return
     for req in filtered[:50]:
         render_request_card(req)
         with st.expander(f"🔧 Gestion — {req.get('title','')[:50]}"):
@@ -201,7 +201,7 @@ def _tab_requests(user):
 
 def _tab_users(user):
     users = get_all_users()
-    section_header(f"Utilisateurs ({len(users)})", "👥")
+    section_header(f"Utilisateurs ({len(users)})", "users")
     with st.expander("➕ Ajouter un utilisateur"):
         with st.form("add_user_form", clear_on_submit=True):
             c1,c2 = st.columns(2)
@@ -218,7 +218,7 @@ def _tab_users(user):
                     save_user(new_u); log_action("USER_CREATED", "USER", new_u["id"], actor=user, details={"username": nu, "role": nr})
                     st.success(f"✅ {nu} créé"); st.rerun()
     if not users:
-        render_empty_state("👥", "Aucun utilisateur enregistré")
+        render_empty_state("users", "Aucun utilisateur enregistré")
         return
     for u in users:
         c1,c2,c3,c4 = st.columns([3,2,2,1])
@@ -247,7 +247,7 @@ def _tab_users(user):
 
 def _tab_members(user):
     members = get_all_members()
-    section_header(f"Analystes / Opérateurs ({len(members)})", "🔬")
+    section_header(f"Analystes / Opérateurs ({len(members)})", "microscope")
     with st.expander("➕ Ajouter un analyste"):
         with st.form("add_m", clear_on_submit=True):
             c1,c2 = st.columns(2)
@@ -261,7 +261,7 @@ def _tab_members(user):
                     sids = [s.get("id") for s in svcs if s.get("name") in ms]
                     m = {"id": str(uuid.uuid4()), "full_name": mn.strip(), "name": mn.strip(), "user_id": mu.strip(), "max_load": ml, "current_load": 0, "skills": sids, "available": True, "productivity_score": 50.0, "productivity_status": "NORMAL", "created_at": datetime.now(timezone.utc).isoformat()}
                     save_member(m); log_action("MEMBER_CREATED","MEMBER",m["id"],actor=user); st.success(f"✅ {mn} ajouté"); st.rerun()
-    if not members: render_empty_state("🔬","Aucun analyste"); return
+    if not members: render_empty_state("microscope","Aucun analyste"); return
     for m in members:
         c1,c2,c3,c4 = st.columns([3,2,2,1])
         with c1:
@@ -284,7 +284,7 @@ def _tab_members(user):
 
     # ── Technique Management ──
     st.markdown("---")
-    section_header("Gestion des Techniques", "🧪")
+    section_header("Gestion des Techniques", "test_tube")
     techniques = get_all_techniques()
     if techniques:
         for tech in techniques:
@@ -303,7 +303,7 @@ def _tab_members(user):
                     st.success(f"🗑️ Technique supprimée"); st.rerun()
             st.markdown("<div style='border-bottom:1px solid #f0f2f6'></div>", unsafe_allow_html=True)
     else:
-        render_empty_state("🧪", "Aucune technique enregistrée")
+        render_empty_state("test_tube", "Aucune technique enregistrée")
     st.markdown("##### ➕ Ajouter une technique")
     with st.form("add_technique_form", clear_on_submit=True):
         tc1, tc2 = st.columns(2)
@@ -331,7 +331,7 @@ def _tab_members(user):
 
 def _tab_services(user):
     services = get_all_services()
-    section_header(f"Services ({len(services)})", "🧪")
+    section_header(f"Services ({len(services)})", "test_tube")
     # ── Add new service ──
     with st.expander("➕ Ajouter un service"):
         with st.form("add_s", clear_on_submit=True):
@@ -440,10 +440,10 @@ def _tab_services(user):
 
 def _tab_forms(user):
     from services.registry_loader import get_all_yaml_files, save_service_yaml
-    section_header("Configuration des Formulaires YAML", "📝")
+    section_header("Configuration des Formulaires YAML", "edit")
     yamls = get_all_yaml_files()
     if not yamls:
-        render_empty_state("📝", "Aucun fichier YAML trouvé dans templates/registry/")
+        render_empty_state("edit", "Aucun fichier YAML trouvé dans templates/registry/")
         return
     for yf in yamls:
         svc_code = yf["service_code"]
@@ -517,7 +517,7 @@ def _tab_forms(user):
 
 
 def _tab_payments(user):
-    section_header("Modes de Paiement GENOCLAB", "💳")
+    section_header("Modes de Paiement GENOCLAB", "credit_card")
     methods = get_payment_methods()
     st.markdown(f"**{len(methods)}** mode(s) de paiement configuré(s)")
     for idx, method in enumerate(methods):
@@ -551,20 +551,20 @@ def _tab_payments(user):
 
 
 def _tab_productivity():
-    section_header("Productivité", "📊")
+    section_header("Productivité", "bar_chart")
     c1,c2 = st.columns([3,1])
     with c2:
         if st.button("🔄 Recalculer", key="rc", type="primary"):
             recalculate_all(); st.success("✅ Recalculé"); st.rerun()
     stats = get_all_productivity_stats()
-    if not stats: render_empty_state("📊","Aucun analyste"); return
+    if not stats: render_empty_state("bar_chart","Aucun analyste"); return
     avg = sum(s.get("score",0) for s in stats)/len(stats)
     exc = len([s for s in stats if s.get("status")=="EXCELLENT"])
     low = len([s for s in stats if s.get("status")=="LOW"])
     c1,c2,c3 = st.columns(3)
-    with c1: render_kpi_card("📊", f"{avg:.0f}%", "Score moyen", "blue")
-    with c2: render_kpi_card("🟢", str(exc), "Excellents", "green")
-    with c3: render_kpi_card("🔴", str(low), "En difficulté", "red")
+    with c1: render_kpi_card("bar_chart", f"{avg:.0f}%", "Score moyen", "blue")
+    with c2: render_kpi_card("check_circle", str(exc), "Excellents", "green")
+    with c3: render_kpi_card("alert", str(low), "En difficulté", "red")
     st.markdown("<br/>", unsafe_allow_html=True)
     for s in sorted(stats, key=lambda x: x.get("score",0), reverse=True):
         em = config.PRODUCTIVITY_EMOJI.get(s.get("status","NORMAL"),"⚪")
@@ -579,8 +579,8 @@ def _tab_productivity():
 
 def _tab_documents(user):
     docs = get_all_documents()
-    section_header(f"Documents ({len(docs)})", "📄")
-    if not docs: render_empty_state("📄","Aucun document"); return
+    section_header(f"Documents ({len(docs)})", "file_text")
+    if not docs: render_empty_state("file_text","Aucun document"); return
     for d in sorted(docs, key=lambda x: x.get("created_at",""), reverse=True)[:50]:
         dt = d.get("type","")
         icon = "📋" if "NOTE" in dt else "🧾" if "INVOICE" in dt else "📄"
@@ -605,7 +605,7 @@ def _tab_documents(user):
                 st.success(f"✅ Document généré" if p else "⚠️ Erreur")
 
 def _tab_audit():
-    section_header("Journal d'Audit", "📜")
+    section_header("Journal d'Audit", "file")
     logs = safe_get_all_audit_logs()
     f1,f2,f3 = st.columns(3)
     with f1: af = st.text_input("🔍 Action", key="sa_af")
@@ -628,7 +628,7 @@ def _tab_audit():
 
 def _tab_content(user):
     from core.repository import get_content, save_content
-    section_header("Gestion du contenu", "📝")
+    section_header("Gestion du contenu", "edit")
     st.info("Modifiez les textes affichés sur la plateforme.")
     content_keys = [
         ("home_title", "Titre page d'accueil", "PLAGENOR 4.0"),
@@ -650,7 +650,7 @@ def _tab_content(user):
 
 
 def _tab_system(user):
-    section_header("Système", "⚙️")
+    section_header("Système", "settings")
     c1,c2,c3 = st.columns(3)
     with c1:
         st.markdown("#### 💾 Sauvegarde")

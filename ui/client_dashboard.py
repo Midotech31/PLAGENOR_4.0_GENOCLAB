@@ -49,11 +49,11 @@ def _render_client_dashboard_inner(user):
     pending_quotes = [r for r in active if r.get("status")=="QUOTE_SENT"]
 
     c1,c2,c3,c4,c5 = st.columns(5)
-    with c1: render_kpi_card("📋", len(geno), t("requests"), "teal")
-    with c2: render_kpi_card("🔄", len(active), t("in_progress"), "orange")
-    with c3: render_kpi_card("✅", len(completed), t("completed"), "green")
-    with c4: render_kpi_card("🧾", len(invoices), t("invoices"), "purple")
-    with c5: render_kpi_card("📧", len(pending_quotes), t("pending"), "red" if pending_quotes else "blue")
+    with c1: render_kpi_card("clipboard", len(geno), t("requests"), "teal")
+    with c2: render_kpi_card("refresh", len(active), t("in_progress"), "orange")
+    with c3: render_kpi_card("check_circle", len(completed), t("completed"), "green")
+    with c4: render_kpi_card("invoice", len(invoices), t("invoices"), "purple")
+    with c5: render_kpi_card("mail", len(pending_quotes), t("pending"), "red" if pending_quotes else "blue")
     st.markdown("<br/>", unsafe_allow_html=True)
 
     if pending_quotes:
@@ -62,7 +62,7 @@ def _render_client_dashboard_inner(user):
     tabs = st.tabs([f"➕ {t('new_request')}",f"📋 {t('my_requests')}",f"🧾 {t('invoices')}",f"📦 {t('archives')}",f"🔔 {t('notifications')}"])
 
     with tabs[0]:
-        section_header("Soumettre une demande d'analyse", "➕")
+        section_header("Soumettre une demande d'analyse", "plus")
         registry = load_service_registry()
         if not registry: st.warning("Aucun service."); return
         codes = sorted(registry.keys())
@@ -137,7 +137,7 @@ def _render_client_dashboard_inner(user):
                 except Exception as e: st.error(str(e))
 
     with tabs[1]:
-        if not active: render_empty_state("📭","Aucune demande en cours")
+        if not active: render_empty_state("archive","Aucune demande en cours")
         else:
             for req in sorted(active, key=lambda x: x.get("created_at",""), reverse=True):
                 render_request_card(req)
@@ -195,7 +195,7 @@ def _render_client_dashboard_inner(user):
                         st.markdown(f"**Votre évaluation:** {render_star_rating_html(req['service_rating'])}", unsafe_allow_html=True)
 
     with tabs[2]:
-        if not invoices: render_empty_state("🧾","Aucune facture")
+        if not invoices: render_empty_state("invoice","Aucune facture")
         else:
             for inv in sorted(invoices, key=lambda x: x.get("created_at",""), reverse=True):
                 st.markdown(f"**{inv.get('invoice_number','')}** · {fmt_date(inv.get('created_at',''))} · **{fmt_currency(inv.get('total_ttc',0))}** {'🔒' if inv.get('locked') else ''}")
@@ -203,13 +203,13 @@ def _render_client_dashboard_inner(user):
 
     with tabs[3]:
         arch = completed + [r for r in get_all_archived_requests() if r.get("client_id")==user.get("id")]
-        if not arch: render_empty_state("📦","Aucune archive")
+        if not arch: render_empty_state("archive","Aucune archive")
         else:
             for r in arch[:20]: render_request_card(r)
 
     with tabs[4]:
         notifs = get_user_notifications(user.get("id",""))
-        if not notifs: render_empty_state("🔔","Aucune notification")
+        if not notifs: render_empty_state("bell","Aucune notification")
         else:
             for n in notifs[:30]:
                 st.markdown(f'<div style="padding:8px 12px;border-left:3px solid #117A65;margin-bottom:6px;font-size:13px">{n.get("message","")} · {fmt_date(n.get("created_at",""))}</div>', unsafe_allow_html=True)

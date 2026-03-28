@@ -53,10 +53,10 @@ def _render_member_dashboard_inner(user):
     in_prog = [r for r in my_reqs if r.get("status") in ("ANALYSIS_STARTED","ANALYSIS_FINISHED","SAMPLE_RECEIVED")]
 
     c1,c2,c3,c4 = st.columns(4)
-    with c1: render_kpi_card("📋", len(my_reqs), t("assigned"), "blue")
-    with c2: render_kpi_card("🔬", len(in_prog), t("in_progress"), "orange")
-    with c3: render_kpi_card("✅", len(completed), t("completed"), "green")
-    with c4: render_kpi_card(prod.get("emoji","⚪"), f"{prod.get('score',0):.0f}%", t("productivity"), "purple")
+    with c1: render_kpi_card("clipboard", len(my_reqs), t("assigned"), "blue")
+    with c2: render_kpi_card("microscope", len(in_prog), t("in_progress"), "orange")
+    with c3: render_kpi_card("check_circle", len(completed), t("completed"), "green")
+    with c4: render_kpi_card("bar_chart", f"{prod.get('score',0):.0f}%", t("productivity"), "purple")
     st.markdown("<br/>", unsafe_allow_html=True)
     if member:
         load, mx = member.get("current_load",0), member.get("max_load",config.DEFAULT_MAX_LOAD)
@@ -65,7 +65,7 @@ def _render_member_dashboard_inner(user):
 
     tabs = st.tabs([f"⏳ {t('pending')}",f"🔬 {t('in_progress')}",f"✅ {t('completed')}","👤 Mon Profil",f"🏆 {t('points_cheers')}",f"🔔 {t('notifications')}"])
     with tabs[0]:
-        if not pending: render_empty_state("✅","Aucune tâche en attente")
+        if not pending: render_empty_state("check_circle","Aucune tâche en attente")
         else:
             for req in pending:
                 render_request_card(req)
@@ -140,7 +140,7 @@ def _render_member_dashboard_inner(user):
                             st.success("💬 Commentaire ajouté"); st.rerun()
     with tabs[1]:
         active = [r for r in my_reqs if r.get("status") in ("ANALYSIS_STARTED","ANALYSIS_FINISHED","SAMPLE_RECEIVED")]
-        if not active: render_empty_state("🔬","Aucune analyse en cours")
+        if not active: render_empty_state("microscope","Aucune analyse en cours")
         else:
             for req in active:
                 render_request_card(req)
@@ -197,7 +197,7 @@ def _render_member_dashboard_inner(user):
                             add_comment_to_request(req["id"], cmt_text2.strip(), user)
                             st.success("💬 Commentaire ajouté"); st.rerun()
     with tabs[2]:
-        if not completed: render_empty_state("📦","Aucune analyse terminée")
+        if not completed: render_empty_state("archive","Aucune analyse terminée")
         else:
             for req in completed[:20]: render_request_card(req)
     with tabs[3]:
@@ -226,16 +226,16 @@ def _render_member_dashboard_inner(user):
                 st.success("Techniques mises à jour!")
                 st.rerun()
         else:
-            render_empty_state("👤", "Profil analyste non trouvé")
+            render_empty_state("user", "Profil analyste non trouvé")
     with tabs[4]:
         # Points & Cheers
         if mid:
             points_data = get_member_points(mid)
             c1,c2 = st.columns(2)
             with c1:
-                render_kpi_card("⭐", points_data["total_points"], "Points totaux", "orange")
+                render_kpi_card("star", points_data["total_points"], "Points totaux", "orange")
             with c2:
-                render_kpi_card("💬", len(points_data["cheers"]), "Encouragements", "teal")
+                render_kpi_card("message", len(points_data["cheers"]), "Encouragements", "teal")
             st.markdown("<br/>", unsafe_allow_html=True)
             # Progress bar to 100 points
             total_pts = points_data["total_points"]
@@ -251,20 +251,20 @@ def _render_member_dashboard_inner(user):
                     st.image(member["gift_image"], caption="Votre récompense", width=200)
             st.markdown("<br/>", unsafe_allow_html=True)
             if points_data["points_history"]:
-                section_header("Historique des points","⭐")
+                section_header("Historique des points","star")
                 for ph in reversed(points_data["points_history"][-20:]):
                     st.markdown(f'<div style="padding:6px 12px;border-left:3px solid #F39C12;margin-bottom:4px;font-size:13px">+{ph.get("points",0)} pts — {ph.get("reason","")} <span style="color:#7F8C9B;margin-left:8px">par {ph.get("awarded_by_name","")}</span> <span style="color:#ABB2B9">{fmt_date(ph.get("at",""))}</span></div>', unsafe_allow_html=True)
             if points_data["cheers"]:
-                section_header("Encouragements reçus","💬")
+                section_header("Encouragements reçus","message")
                 for ch in reversed(points_data["cheers"][-10:]):
                     st.markdown(f'<div class="data-card"><strong>💬 {ch.get("from","")}</strong> <span style="color:#ABB2B9">{fmt_date(ch.get("at",""))}</span><p style="margin:4px 0 0;color:#4A5568">{ch.get("message","")}</p></div>', unsafe_allow_html=True)
             if not points_data["points_history"] and not points_data["cheers"]:
-                render_empty_state("🏆","Aucun point ou encouragement pour le moment")
+                render_empty_state("award","Aucun point ou encouragement pour le moment")
         else:
-            render_empty_state("👤","Profil analyste non trouvé")
+            render_empty_state("user","Profil analyste non trouvé")
     with tabs[5]:
         notifs = get_user_notifications(user.get("id",""))
-        if not notifs: render_empty_state("🔔","Aucune notification")
+        if not notifs: render_empty_state("bell","Aucune notification")
         else:
             for n in notifs[:30]:
                 read = "opacity:0.5" if n.get("read") else ""

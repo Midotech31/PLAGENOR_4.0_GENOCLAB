@@ -46,10 +46,10 @@ def _render_requester_dashboard_inner(user):
     completed = [r for r in my if r.get("status") in ("COMPLETED","CLOSED")]
     rejected = [r for r in my if r.get("status") == "REJECTED"]
     c1,c2,c3,c4 = st.columns(4)
-    with c1: render_kpi_card("📋", len(my), t("requests"), "blue")
-    with c2: render_kpi_card("🔄", len(active), t("in_progress"), "orange")
-    with c3: render_kpi_card("✅", len(completed), t("completed"), "green")
-    with c4: render_kpi_card("❌", len(rejected), "❌", "red")
+    with c1: render_kpi_card("clipboard", len(my), t("requests"), "blue")
+    with c2: render_kpi_card("refresh", len(active), t("in_progress"), "orange")
+    with c3: render_kpi_card("check_circle", len(completed), t("completed"), "green")
+    with c4: render_kpi_card("x_circle", len(rejected), t("rejected"), "red")
     st.markdown("<br/>", unsafe_allow_html=True)
 
     tabs = st.tabs([f"➕ {t('new_request')}", f"📋 {t('my_requests')}", f"📦 {t('archives')}", f"🔔 {t('notifications')}"])
@@ -63,20 +63,20 @@ def _render_requester_dashboard_inner(user):
     with tabs[2]:
         archived = completed + rejected
         archived += [r for r in get_all_archived_requests() if r.get("requester_id")==user.get("id")]
-        if not archived: render_empty_state("📦","Aucune archive")
+        if not archived: render_empty_state("archive","Aucune archive")
         else:
             for r in archived[:20]: render_request_card(r)
 
     with tabs[3]:
         notifs = get_user_notifications(user.get("id",""))
-        if not notifs: render_empty_state("🔔","Aucune notification")
+        if not notifs: render_empty_state("bell","Aucune notification")
         else:
             for n in notifs[:30]:
                 op = "opacity:0.5" if n.get("read") else ""
                 st.markdown(f'<div style="padding:8px 12px;border-left:3px solid #1B4F72;margin-bottom:6px;font-size:13px;{op}">{n.get("message","")} <span style="color:#ABB2B9;margin-left:8px">{fmt_date(n.get("created_at",""))}</span></div>', unsafe_allow_html=True)
 
 def _new_request_form(user):
-    section_header("Soumettre une demande IBTIKAR", "➕")
+    section_header("Soumettre une demande IBTIKAR", "plus")
 
     registry = load_service_registry()
     if not registry:
@@ -206,8 +206,8 @@ def _new_request_form(user):
                 st.error(f"Erreur de calcul: {e}")
 
 def _my_requests(user, active):
-    section_header(f"Demandes en cours ({len(active)})", "📋")
-    if not active: render_empty_state("📭","Aucune demande en cours"); return
+    section_header(f"Demandes en cours ({len(active)})", "clipboard")
+    if not active: render_empty_state("archive","Aucune demande en cours"); return
     for req in sorted(active, key=lambda x: x.get("created_at",""), reverse=True):
         render_request_card(req)
         with st.expander(f"📊 Suivi — {req.get('title','')[:50]}"):

@@ -42,10 +42,10 @@ def _render_finance_dashboard_inner(user):
     ibk = budget.get("ibtikar", {})
     gcl = budget.get("genoclab", {})
     c1,c2,c3,c4 = st.columns(4)
-    with c1: render_kpi_card("🏛", fmt_currency(ibk.get('total',0)), f"IBTIKAR {t('revenue_virtual')}", "orange")
-    with c2: render_kpi_card("🧬", fmt_currency(gcl.get('total',0)), f"GENOCLAB {t('revenue_real')}", "green")
-    with c3: render_kpi_card("🧾", str(gcl.get('count',0)), t("invoices"), "teal")
-    with c4: render_kpi_card("🎓", str(ibk.get('students',0)), t("students"), "purple")
+    with c1: render_kpi_card("flask", fmt_currency(ibk.get('total',0)), f"IBTIKAR {t('revenue_virtual')}", "orange")
+    with c2: render_kpi_card("dna", fmt_currency(gcl.get('total',0)), f"GENOCLAB {t('revenue_real')}", "green")
+    with c3: render_kpi_card("invoice", str(gcl.get('count',0)), t("invoices"), "teal")
+    with c4: render_kpi_card("award", str(ibk.get('students',0)), t("students"), "purple")
     st.markdown("<br/>", unsafe_allow_html=True)
 
     tabs = st.tabs([f"🏦 {t('validation')} IBTIKAR", f"📊 {t('budget')}", f"🧾 {t('invoices')} GENOCLAB", f"📈 {t('archives')}", f"📜 {t('audit')}"])
@@ -72,7 +72,7 @@ def _render_finance_dashboard_inner(user):
 
 
 def _ibtikar_validation(user):
-    section_header("Demandes IBTIKAR en attente de validation financière", "🏦")
+    section_header("Demandes IBTIKAR en attente de validation financière", "dollar")
 
     requests = get_all_active_requests()
     pending_finance = [r for r in requests
@@ -80,7 +80,7 @@ def _ibtikar_validation(user):
                        and r.get("status") == "VALIDATION_PEDAGOGIQUE"]
 
     if not pending_finance:
-        render_empty_state("✅", "Aucune demande en attente de validation financière")
+        render_empty_state("check_circle", "Aucune demande en attente de validation financière")
         return
 
     for req in pending_finance:
@@ -160,12 +160,12 @@ def _ibtikar_validation(user):
 
     # Also show GENOCLAB payment confirmations
     st.markdown("---")
-    section_header("Paiements GENOCLAB en attente", "💳")
+    section_header("Paiements GENOCLAB en attente", "credit_card")
     pending_payment = [r for r in requests
                        if r.get("channel") == config.CHANNEL_GENOCLAB
                        and r.get("status") == "INVOICE_GENERATED"]
     if not pending_payment:
-        render_empty_state("✅", "Aucun paiement en attente")
+        render_empty_state("check_circle", "Aucun paiement en attente")
     else:
         for req in pending_payment:
             render_request_card(req)
@@ -184,7 +184,7 @@ def _ibtikar_validation(user):
 
 
 def _budget_overview():
-    section_header("Vue d'ensemble budgétaire", "📊")
+    section_header("Vue d'ensemble budgétaire", "bar_chart")
     budget = get_budget_dashboard()
     ibk = budget.get("ibtikar", {})
     gcl = budget.get("genoclab", {})
@@ -224,16 +224,16 @@ def _budget_overview():
     overrides = get_override_logs()
     if overrides:
         st.markdown("---")
-        section_header(f"Dépassements autorisés ({len(overrides)})", "⚠️")
+        section_header(f"Dépassements autorisés ({len(overrides)})", "alert")
         for o in overrides:
             st.markdown(f'<div style="padding:8px;border-left:3px solid #E74C3C;margin-bottom:6px;background:#FEF9E7;border-radius:4px;font-size:13px">⚠️ <strong>{fmt_currency(o.get("amount",0))}</strong> par {o.get("actor_username","")} — {fmt_datetime(o.get("timestamp",""))}<br/><span style="color:#7F8C9B">{o.get("justification","")}</span></div>', unsafe_allow_html=True)
 
 
 def _genoclab_invoices(user):
-    section_header("Factures GENOCLAB", "🧾")
+    section_header("Factures GENOCLAB", "invoice")
     invoices = get_all_invoices()
     if not invoices:
-        render_empty_state("🧾", "Aucune facture")
+        render_empty_state("invoice", "Aucune facture")
         return
 
     total_ht = sum(i.get("subtotal_ht",0) for i in invoices)
@@ -252,10 +252,10 @@ def _genoclab_invoices(user):
 
 
 def _revenue_archives():
-    section_header("Archives mensuelles des revenus", "📈")
+    section_header("Archives mensuelles des revenus", "trending_up")
     archives = get_revenue_archives()
     if not archives:
-        render_empty_state("📈", "Aucune archive mensuelle. L'archivage est déclenché depuis l'espace Super Admin.")
+        render_empty_state("trending_up", "Aucune archive mensuelle. L'archivage est déclenché depuis l'espace Super Admin.")
         return
     for arch in sorted(archives, key=lambda x: x.get("month", ""), reverse=True):
         month = arch.get("month", "")
@@ -276,11 +276,11 @@ def _revenue_archives():
 
 
 def _financial_history():
-    section_header("Historique Financier", "📜")
+    section_header("Historique Financier", "file")
     logs = [l for l in safe_get_all_audit_logs()
             if any(kw in l.get("action","") for kw in ("FINANCIAL","BUDGET","INVOICE","PRICE","OVERRIDE"))]
     if not logs:
-        render_empty_state("📜", "Aucun événement financier")
+        render_empty_state("file", "Aucun événement financier")
         return
     render_export_button(logs, filename="historique_financier.csv", columns=["action","actor_username","timestamp","entity_type"])
     for e in sorted(logs, key=lambda x: x.get("timestamp",""), reverse=True)[:50]:

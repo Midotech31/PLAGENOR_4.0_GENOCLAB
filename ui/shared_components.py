@@ -58,15 +58,28 @@ def resolve_service_name(service_id: str) -> str:
 
 
 # ── KPI Card ──────────────────────────────────────────────────────────────────
-def render_kpi_card(icon: str, value, label: str, color: str = "blue"):
-    color_map = {
+def render_kpi_card(icon_name: str, value, label: str, color: str = "blue"):
+    from utils.icons import icon_colored, ICONS
+    color_hex_map = {
+        "blue": "#3B82F6", "green": "#10B981", "purple": "#8B5CF6",
+        "orange": "#F59E0B", "red": "#EF4444", "teal": "#0E8C7F",
+    }
+    hex_color = color_hex_map.get(color, "#4F46E5")
+    bg_map = {
         "blue": "#EFF6FF", "green": "#ECFDF5", "purple": "#F5F3FF",
         "orange": "#FFF7ED", "red": "#FEF2F2", "teal": "#F0FDFA",
     }
-    bg = color_map.get(color, "#F8FAFC")
+    bg = bg_map.get(color, "#F8FAFC")
+
+    # Use SVG icon if available, otherwise fall back to the string (emoji)
+    if icon_name in ICONS:
+        icon_html = icon_colored(icon_name, size=24, color=hex_color)
+    else:
+        icon_html = f'<span style="font-size:24px">{icon_name}</span>'
+
     st.markdown(f"""
     <div class="kpi-card {color}">
-        <div class="kpi-icon-box" style="background:{bg}">{icon}</div>
+        <div class="kpi-icon-box" style="background:{bg};width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;margin-bottom:12px">{icon_html}</div>
         <div class="kpi-value">{value}</div>
         <div class="kpi-label">{label}</div>
     </div>
@@ -189,11 +202,16 @@ def render_workflow_progress(request: dict):
 
 
 # ── Empty State ───────────────────────────────────────────────────────────────
-def render_empty_state(icon: str = "📭", text: str = ""):
+def render_empty_state(icon_name: str = "archive", text: str = ""):
+    from utils.icons import icon_colored, ICONS
     display_text = text if text else t("no_data")
+    if icon_name in ICONS:
+        icon_html = icon_colored(icon_name, size=32, color="#94A3B8")
+    else:
+        icon_html = f'<span class="empty-state-icon">{icon_name}</span>'
     st.markdown(f"""
     <div class="empty-state">
-        <span class="empty-state-icon">{icon}</span>
+        {icon_html}
         <span class="empty-state-text">{display_text}</span>
     </div>""", unsafe_allow_html=True)
 
@@ -243,7 +261,7 @@ def render_sidebar_user(user: dict):
         # ── Language Switcher ──
         current_lang = get_lang()
         switch_label = t("lang_switch")
-        if st.button(f"🌐 {switch_label}", use_container_width=True, key="lang_toggle"):
+        if st.button(f"{switch_label}", use_container_width=True, key="lang_toggle"):
             new_lang = "en" if current_lang == "fr" else "fr"
             set_lang(new_lang)
             st.rerun()
@@ -252,7 +270,7 @@ def render_sidebar_user(user: dict):
         if os.path.exists(logo_path):
             st.image(logo_path, use_container_width=True)
         else:
-            st.markdown("## 🧬 PLAGENOR 4.0")
+            st.markdown("## PLAGENOR 4.0")
 
         # Show ESSBO logo smaller below
         essbo_path = os.path.join(assets_dir, "logo_essbo.png")
@@ -266,16 +284,19 @@ def render_sidebar_user(user: dict):
         role_html = get_role_badge_html(role)
         org = user.get("organization_id", "ESSBO")
 
+        from utils.icons import icon_colored
+        user_icon = icon_colored("user", size=16, color="#1B2838")
+        org_icon = icon_colored("building", size=16, color="#7F8C9B")
         st.markdown(f"""
         <div class="sidebar-user-card">
-            <div class="sidebar-user-name">👤 {name}</div>
+            <div class="sidebar-user-name">{user_icon} {name}</div>
             <div style="margin:6px 0">{role_html}</div>
-            <div class="sidebar-user-role">🏛 {org}</div>
+            <div class="sidebar-user-role">{org_icon} {org}</div>
         </div>""", unsafe_allow_html=True)
 
         st.markdown("---")
 
-        if st.button(f"🚪 {t('logout')}", use_container_width=True):
+        if st.button(f"{t('logout')}", use_container_width=True):
             try:
                 from core.audit_engine import log_action
                 log_action("LOGOUT", "AUTH", user.get("id", ""), actor=user)
@@ -297,12 +318,17 @@ def confirm_action(label: str, key: str) -> bool:
 
 
 # ── Section Header ────────────────────────────────────────────────────────────
-def section_header(text: str, icon: str = ""):
-    st.markdown(f'<div class="section-header">{icon} {text}</div>', unsafe_allow_html=True)
+def section_header(text: str, icon_name: str = ""):
+    from utils.icons import icon_colored, ICONS
+    if icon_name in ICONS:
+        icon_html = icon_colored(icon_name, size=20, color="#1B2838")
+    else:
+        icon_html = icon_name
+    st.markdown(f'<div class="section-header">{icon_html} {text}</div>', unsafe_allow_html=True)
 
 
 # ── CSV Export ───────────────────────────────────────────────────────────────
-def render_export_button(data: list, filename: str = "export.csv", label: str = "📥 Exporter CSV", columns: list = None):
+def render_export_button(data: list, filename: str = "export.csv", label: str = "Exporter CSV", columns: list = None):
     """Render a CSV export button for a list of dicts."""
     if not data:
         return

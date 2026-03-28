@@ -46,11 +46,11 @@ def _render_platform_admin_dashboard_inner(user):
     stats = get_platform_stats()
     budget = get_budget_dashboard()
     c1,c2,c3,c4,c5 = st.columns(5)
-    with c1: render_kpi_card("📋", stats["total_requests"], t("requests"), "blue")
-    with c2: render_kpi_card("🏛", stats["ibtikar_active"], t("ibtikar"), "blue")
-    with c3: render_kpi_card("🧬", stats["genoclab_active"], t("genoclab"), "teal")
-    with c4: render_kpi_card("✅", stats["completed"], t("completed"), "green")
-    with c5: render_kpi_card("💰", f"{budget['pct']:.0f}%", t("budget"), "orange" if budget["pct"]>70 else "blue")
+    with c1: render_kpi_card("clipboard", stats["total_requests"], t("requests"), "blue")
+    with c2: render_kpi_card("flask", stats["ibtikar_active"], t("ibtikar"), "blue")
+    with c3: render_kpi_card("dna", stats["genoclab_active"], t("genoclab"), "teal")
+    with c4: render_kpi_card("check_circle", stats["completed"], t("completed"), "green")
+    with c5: render_kpi_card("dollar", f"{budget['pct']:.0f}%", t("budget"), "orange" if budget["pct"]>70 else "blue")
     st.markdown("<br/>", unsafe_allow_html=True)
 
     tabs = st.tabs([f"⏳ {t('pending')}",f"📋 {t('all_requests')}",f"🎯 {t('assignment')}",f"💰 {t('budget')}",f"📄 {t('documents')}"])
@@ -68,9 +68,9 @@ def _pending(user):
                          "REQUEST_CREATED","QUOTE_DRAFT","QUOTE_SENT","QUOTE_VALIDATED_BY_CLIENT",
                          "INVOICE_GENERATED","PAYMENT_CONFIRMED","COMPLETED"}
     pending = [r for r in requests if r.get("status") in actionable_states]
-    section_header(f"En attente d'action ({len(pending)})", "⏳")
+    section_header(f"En attente d'action ({len(pending)})", "clock")
 
-    if not pending: render_empty_state("✅","Aucune action requise"); return
+    if not pending: render_empty_state("check_circle","Aucune action requise"); return
 
     for req in sorted(pending, key=lambda x: x.get("created_at",""), reverse=True):
         render_request_card(req)
@@ -322,14 +322,14 @@ def _all_requests(user):
     st.write(f"**{len(filtered)}** demande(s)")
     render_export_button(filtered, filename="demandes_plateforme.csv", columns=["id","title","channel","status","created_at","service_code","requester_name"])
     if not filtered:
-        render_empty_state("📭", "Aucune demande pour le moment. Les nouvelles demandes apparaîtront ici.")
+        render_empty_state("archive", "Aucune demande pour le moment. Les nouvelles demandes apparaîtront ici.")
         return
     page = render_pagination(filtered, page_key="pa_all_page")
     for r in page:
         render_request_card(r)
 
 def _assignment(user):
-    section_header("Recommandation d'Assignation","🎯")
+    section_header("Recommandation d'Assignation","target")
     from services.registry_loader import get_all_service_codes
     codes = get_all_service_codes()
     if codes:
@@ -340,14 +340,14 @@ def _assignment(user):
                 sc = m.get("_score",0)
                 co = "#27AE60" if sc>=70 else "#F39C12" if sc>=50 else "#E74C3C"
                 st.markdown(f'<div class="data-card" style="display:flex;justify-content:space-between;align-items:center"><div><strong>{m.get("full_name",m.get("name",""))}</strong> · Charge: {m.get("current_load",0)}/{m.get("max_load",5)}</div><div><span style="font-weight:700;font-family:monospace;font-size:18px;color:{co}">{sc:.0f}</span></div></div>', unsafe_allow_html=True)
-        else: render_empty_state("👥","Aucun analyste disponible")
+        else: render_empty_state("users","Aucun analyste disponible")
 
     # ── Points & Cheers ──
     st.markdown("---")
-    section_header("Points & Encouragements","🏆")
+    section_header("Points & Encouragements","award")
     members = get_all_members()
     if not members:
-        render_empty_state("👥","Aucun analyste"); return
+        render_empty_state("users","Aucun analyste"); return
     member_opts = {f"{m.get('full_name',m.get('name',''))} (pts: {m.get('total_points',0)})": m.get("id") for m in members}
     sel_m = st.selectbox("Analyste / Opérateur", list(member_opts.keys()), key="pa_cheer_m")
     mid = member_opts[sel_m]
@@ -382,7 +382,7 @@ def _assignment(user):
                 st.warning("Message obligatoire")
     # ── Gift image upload ──
     st.markdown("---")
-    section_header("Récompense (Cadeau)", "🎁")
+    section_header("Récompense (Cadeau)", "gift")
     sel_member = get_member(mid) if mid else None
     if sel_member:
         if sel_member.get("gift_unlocked"):
@@ -408,15 +408,15 @@ def _budget():
     gcl = budget.get("genoclab", {})
     c1,c2 = st.columns(2)
     with c1:
-        section_header("Revenus IBTIKAR (virtuels)","🏛")
-        render_kpi_card("💰", fmt_currency(ibk.get('total',0)), f"{ibk.get('count',0)} demandes · {ibk.get('students',0)} étudiants", "orange")
+        section_header("Revenus IBTIKAR (virtuels)","flask")
+        render_kpi_card("dollar", fmt_currency(ibk.get('total',0)), f"{ibk.get('count',0)} demandes · {ibk.get('students',0)} étudiants", "orange")
         st.markdown(f'<div style="font-size:13px;color:#64748B;margin-top:8px">ℹ️ {fmt_currency(ibk.get("budget_per_student",200000))} par étudiant / an</div>', unsafe_allow_html=True)
     with c2:
-        section_header("Revenus GENOCLAB (réels)","🧬")
-        render_kpi_card("💵", fmt_currency(gcl.get('total',0)), f"{gcl.get('count',0)} factures", "green")
-    st.markdown("---"); section_header("Factures","🧾")
+        section_header("Revenus GENOCLAB (réels)","dna")
+        render_kpi_card("trending_up", fmt_currency(gcl.get('total',0)), f"{gcl.get('count',0)} factures", "green")
+    st.markdown("---"); section_header("Factures","invoice")
     invoices = get_all_invoices()
-    if not invoices: render_empty_state("🧾","Aucune facture")
+    if not invoices: render_empty_state("invoice","Aucune facture")
     else:
         for inv in sorted(invoices, key=lambda x: x.get("created_at",""), reverse=True):
             st.markdown(f"**{inv.get('invoice_number','')}** · {fmt_date(inv.get('created_at',''))} · **{fmt_currency(inv.get('total_ttc',0))}** {'🔒' if inv.get('locked') else ''}")
@@ -424,8 +424,8 @@ def _budget():
 
 def _documents(user):
     docs = get_all_documents()
-    section_header(f"Documents ({len(docs)})","📄")
-    if not docs: render_empty_state("📄","Aucun document")
+    section_header(f"Documents ({len(docs)})","file_text")
+    if not docs: render_empty_state("file_text","Aucun document")
     else:
         for d in sorted(docs, key=lambda x: x.get("created_at",""), reverse=True)[:30]:
             dt=d.get("type",""); icon="📋" if "NOTE" in dt else "🧾" if "INVOICE" in dt else "📄" if "FORM" in dt else "📄"
