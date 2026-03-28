@@ -349,7 +349,7 @@ def _assignment(user):
     if not members:
         render_empty_state("👥","Aucun analyste"); return
     member_opts = {f"{m.get('full_name',m.get('name',''))} (pts: {m.get('total_points',0)})": m.get("id") for m in members}
-    sel_m = st.selectbox("Analyste", list(member_opts.keys()), key="pa_cheer_m")
+    sel_m = st.selectbox("Analyste / Opérateur", list(member_opts.keys()), key="pa_cheer_m")
     mid = member_opts[sel_m]
     c1,c2 = st.columns(2)
     with c1:

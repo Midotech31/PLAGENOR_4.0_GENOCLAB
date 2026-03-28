@@ -33,7 +33,7 @@ ALL_ROLES = [ROLE_SUPER_ADMIN, ROLE_PLATFORM_ADMIN, ROLE_MEMBER,
 ROLE_LABELS = {
     ROLE_SUPER_ADMIN:    "Super Administrateur",
     ROLE_PLATFORM_ADMIN: "Administrateur Plateforme",
-    ROLE_MEMBER:         "Analyste / Membre",
+    ROLE_MEMBER:         "Analyste / Opérateur",
     ROLE_FINANCE:        "Responsable Financier",
     ROLE_REQUESTER:      "Demandeur IBTIKAR",
     ROLE_CLIENT:         "Client GENOCLAB",

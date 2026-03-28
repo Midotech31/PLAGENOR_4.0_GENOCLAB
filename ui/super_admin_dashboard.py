@@ -247,7 +247,7 @@ def _tab_users(user):
 
 def _tab_members(user):
     members = get_all_members()
-    section_header(f"Analystes ({len(members)})", "🔬")
+    section_header(f"Analystes / Opérateurs ({len(members)})", "🔬")
     with st.expander("➕ Ajouter un analyste"):
         with st.form("add_m", clear_on_submit=True):
             c1,c2 = st.columns(2)

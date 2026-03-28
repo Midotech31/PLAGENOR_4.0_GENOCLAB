@@ -28,8 +28,8 @@ def render_member_dashboard(user):
     try:
         _render_member_dashboard_inner(user)
     except Exception as e:
-        _log.exception("Erreur dans le tableau Analyste")
-        st.error(f"❌ Une erreur inattendue s'est produite dans le tableau Analyste. Veuillez réessayer ou contacter l'administrateur.\n\nDétail: {e}")
+        _log.exception("Erreur dans le tableau Analyste / Opérateur")
+        st.error(f"❌ Une erreur inattendue s'est produite dans le tableau Analyste / Opérateur. Veuillez réessayer ou contacter l'administrateur.\n\nDétail: {e}")
 
 def _render_member_dashboard_inner(user):
     st.session_state["user"] = user
