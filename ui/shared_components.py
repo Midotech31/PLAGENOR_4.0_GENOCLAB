@@ -8,6 +8,7 @@ import math
 from datetime import datetime, timezone
 from typing import Optional
 import config
+from utils.i18n import t, get_lang, set_lang
 
 
 # ── Formatters ────────────────────────────────────────────────────────────────
@@ -183,11 +184,12 @@ def render_workflow_progress(request: dict):
 
 
 # ── Empty State ───────────────────────────────────────────────────────────────
-def render_empty_state(icon: str = "📭", text: str = "Aucune donnée disponible"):
+def render_empty_state(icon: str = "📭", text: str = ""):
+    display_text = text if text else t("no_data")
     st.markdown(f"""
     <div class="empty-state">
         <span class="empty-state-icon">{icon}</span>
-        <span class="empty-state-text">{text}</span>
+        <span class="empty-state-text">{display_text}</span>
     </div>""", unsafe_allow_html=True)
 
 
@@ -233,6 +235,14 @@ def render_sidebar_user(user: dict):
     import os
     assets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
     with st.sidebar:
+        # ── Language Switcher ──
+        current_lang = get_lang()
+        switch_label = t("lang_switch")
+        if st.button(f"🌐 {switch_label}", use_container_width=True, key="lang_toggle"):
+            new_lang = "en" if current_lang == "fr" else "fr"
+            set_lang(new_lang)
+            st.rerun()
+
         logo_path = os.path.join(assets_dir, "logo_plagenor.png")
         if os.path.exists(logo_path):
             st.image(logo_path, use_container_width=True)
@@ -242,7 +252,7 @@ def render_sidebar_user(user: dict):
         # Show ESSBO logo smaller below
         essbo_path = os.path.join(assets_dir, "logo_essbo.png")
         if os.path.exists(essbo_path):
-            st.image(essbo_path, width=140)
+            st.image(essbo_path, width=150)
 
         st.markdown("---")
 
@@ -260,7 +270,7 @@ def render_sidebar_user(user: dict):
 
         st.markdown("---")
 
-        if st.button("🚪 Déconnexion", use_container_width=True):
+        if st.button(f"🚪 {t('logout')}", use_container_width=True):
             try:
                 from core.audit_engine import log_action
                 log_action("LOGOUT", "AUTH", user.get("id", ""), actor=user)

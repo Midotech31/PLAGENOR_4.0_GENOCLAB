@@ -21,6 +21,7 @@ from services.form_renderer import render_requester_form, render_service_params,
 from services.pricing_engine import calculate_price, format_price
 from services.notification_service import get_user_notifications, get_unread_count
 from core.logger import get_logger
+from utils.i18n import t
 
 _log = get_logger("requester_dashboard")
 
@@ -38,20 +39,20 @@ def _render_requester_dashboard_inner(user):
     render_sidebar_user(user)
     unread = get_unread_count(user.get("id",""))
     badge = f" · 🔔 {unread}" if unread else ""
-    st.markdown(f'<div style="margin-bottom:24px"><h2 style="color:#1B2838;margin:0">📋 Espace Demandeur IBTIKAR</h2><p style="color:#7F8C9B;margin:4px 0 0">Soumettez et suivez vos demandes d\'analyse{badge}</p></div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="margin-bottom:24px"><h2 style="color:#1B2838;margin:0">📋 {t("welcome_requester")}</h2><p style="color:#7F8C9B;margin:4px 0 0">{t("requests")}{badge}</p></div>', unsafe_allow_html=True)
 
     my = get_requests_by_user(user.get("id",""))
     active = [r for r in my if r.get("status") not in ("REJECTED","CLOSED","COMPLETED")]
     completed = [r for r in my if r.get("status") in ("COMPLETED","CLOSED")]
     rejected = [r for r in my if r.get("status") == "REJECTED"]
     c1,c2,c3,c4 = st.columns(4)
-    with c1: render_kpi_card("📋", len(my), "Total", "blue")
-    with c2: render_kpi_card("🔄", len(active), "En cours", "orange")
-    with c3: render_kpi_card("✅", len(completed), "Complétées", "green")
-    with c4: render_kpi_card("❌", len(rejected), "Rejetées", "red")
+    with c1: render_kpi_card("📋", len(my), t("requests"), "blue")
+    with c2: render_kpi_card("🔄", len(active), t("in_progress"), "orange")
+    with c3: render_kpi_card("✅", len(completed), t("completed"), "green")
+    with c4: render_kpi_card("❌", len(rejected), "❌", "red")
     st.markdown("<br/>", unsafe_allow_html=True)
 
-    tabs = st.tabs(["➕ Nouvelle demande", "📋 Mes demandes", "📦 Archives", "🔔 Notifications"])
+    tabs = st.tabs([f"➕ {t('new_request')}", f"📋 {t('my_requests')}", f"📦 {t('archives')}", f"🔔 {t('notifications')}"])
 
     with tabs[0]:
         _new_request_form(user)

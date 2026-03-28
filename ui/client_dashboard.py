@@ -21,6 +21,7 @@ from services.form_renderer import render_service_params, render_sample_table
 from services.pricing_engine import calculate_price, format_price
 from services.notification_service import get_user_notifications, get_unread_count
 from core.logger import get_logger
+from utils.i18n import t
 
 _log = get_logger("client_dashboard")
 
@@ -38,7 +39,7 @@ def _render_client_dashboard_inner(user):
     render_sidebar_user(user)
     unread = get_unread_count(user.get("id",""))
     badge = f" · 🔔 {unread}" if unread else ""
-    st.markdown(f'<div style="margin-bottom:24px"><h2 style="color:#1B2838;margin:0">🏢 Espace Client GENOCLAB</h2><p style="color:#7F8C9B;margin:4px 0 0">Vos demandes d\'analyses génomiques{badge}</p></div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="margin-bottom:24px"><h2 style="color:#1B2838;margin:0">🏢 {t("welcome_client")}</h2><p style="color:#7F8C9B;margin:4px 0 0">{t("requests")}{badge}</p></div>', unsafe_allow_html=True)
 
     my = get_requests_by_user(user.get("id",""))
     geno = [r for r in my if r.get("channel")==config.CHANNEL_GENOCLAB]
@@ -48,17 +49,17 @@ def _render_client_dashboard_inner(user):
     pending_quotes = [r for r in active if r.get("status")=="QUOTE_SENT"]
 
     c1,c2,c3,c4,c5 = st.columns(5)
-    with c1: render_kpi_card("📋", len(geno), "Total", "teal")
-    with c2: render_kpi_card("🔄", len(active), "En cours", "orange")
-    with c3: render_kpi_card("✅", len(completed), "Complétées", "green")
-    with c4: render_kpi_card("🧾", len(invoices), "Factures", "purple")
-    with c5: render_kpi_card("📧", len(pending_quotes), "Devis à valider", "red" if pending_quotes else "blue")
+    with c1: render_kpi_card("📋", len(geno), t("requests"), "teal")
+    with c2: render_kpi_card("🔄", len(active), t("in_progress"), "orange")
+    with c3: render_kpi_card("✅", len(completed), t("completed"), "green")
+    with c4: render_kpi_card("🧾", len(invoices), t("invoices"), "purple")
+    with c5: render_kpi_card("📧", len(pending_quotes), t("pending"), "red" if pending_quotes else "blue")
     st.markdown("<br/>", unsafe_allow_html=True)
 
     if pending_quotes:
         st.markdown(f'<div style="background:#FEF9E7;border:1px solid #F9E79F;border-radius:12px;padding:16px;margin-bottom:16px"><strong>⚠️ {len(pending_quotes)} devis en attente</strong> — Validez ou refusez dans l\'onglet "Mes demandes".</div>', unsafe_allow_html=True)
 
-    tabs = st.tabs(["➕ Nouvelle demande","📋 Mes demandes","🧾 Factures","📦 Archives","🔔 Notifications"])
+    tabs = st.tabs([f"➕ {t('new_request')}",f"📋 {t('my_requests')}",f"🧾 {t('invoices')}",f"📦 {t('archives')}",f"🔔 {t('notifications')}"])
 
     with tabs[0]:
         section_header("Soumettre une demande d'analyse", "➕")

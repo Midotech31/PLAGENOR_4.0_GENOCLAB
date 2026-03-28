@@ -25,6 +25,7 @@ from core.audit_engine import log_action
 from services.document_service import generate_platform_note, generate_ibtikar_form, generate_genoclab_quote, generate_invoice_document
 from services.pricing_engine import format_price
 from core.logger import get_logger
+from utils.i18n import t
 
 _log = get_logger("platform_admin_dashboard")
 
@@ -40,19 +41,19 @@ def _render_platform_admin_dashboard_inner(user):
     st.session_state["authenticated"] = True
     st.markdown(get_global_css(), unsafe_allow_html=True)
     render_sidebar_user(user)
-    st.markdown('<div style="margin-bottom:24px"><h2 style="color:#1B2838;margin:0">⚙️ Administration Plateforme</h2><p style="color:#7F8C9B;margin:4px 0 0">Gestion des demandes, validation et génération de documents</p></div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="margin-bottom:24px"><h2 style="color:#1B2838;margin:0">⚙️ {t("welcome_admin")}</h2><p style="color:#7F8C9B;margin:4px 0 0">{t("requests")}, {t("validation")}, {t("documents")}</p></div>', unsafe_allow_html=True)
 
     stats = get_platform_stats()
     budget = get_budget_dashboard()
     c1,c2,c3,c4,c5 = st.columns(5)
-    with c1: render_kpi_card("📋", stats["total_requests"], "Demandes", "blue")
-    with c2: render_kpi_card("🏛", stats["ibtikar_active"], "IBTIKAR", "blue")
-    with c3: render_kpi_card("🧬", stats["genoclab_active"], "GENOCLAB", "teal")
-    with c4: render_kpi_card("✅", stats["completed"], "Complétées", "green")
-    with c5: render_kpi_card("💰", f"{budget['pct']:.0f}%", "Budget", "orange" if budget["pct"]>70 else "blue")
+    with c1: render_kpi_card("📋", stats["total_requests"], t("requests"), "blue")
+    with c2: render_kpi_card("🏛", stats["ibtikar_active"], t("ibtikar"), "blue")
+    with c3: render_kpi_card("🧬", stats["genoclab_active"], t("genoclab"), "teal")
+    with c4: render_kpi_card("✅", stats["completed"], t("completed"), "green")
+    with c5: render_kpi_card("💰", f"{budget['pct']:.0f}%", t("budget"), "orange" if budget["pct"]>70 else "blue")
     st.markdown("<br/>", unsafe_allow_html=True)
 
-    tabs = st.tabs(["⏳ En attente","📋 Toutes","🎯 Assignation","💰 Budget","📄 Documents"])
+    tabs = st.tabs([f"⏳ {t('pending')}",f"📋 {t('all_requests')}",f"🎯 {t('assignment')}",f"💰 {t('budget')}",f"📄 {t('documents')}"])
     with tabs[0]: _pending(user)
     with tabs[1]: _all_requests(user)
     with tabs[2]: _assignment(user)

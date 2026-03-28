@@ -19,6 +19,7 @@ from core.workflow_engine import transition, get_allowed_transitions
 from core.audit_engine import safe_get_all_audit_logs
 from services.pricing_engine import format_price
 from core.logger import get_logger
+from utils.i18n import t
 
 _log = get_logger("finance_dashboard")
 
@@ -34,20 +35,20 @@ def _render_finance_dashboard_inner(user):
     st.session_state["authenticated"] = True
     st.markdown(get_global_css(), unsafe_allow_html=True)
     render_sidebar_user(user)
-    st.markdown('<div style="margin-bottom:24px"><h2 style="color:#1B2838;margin:0">💰 Tableau Financier</h2><p style="color:#7F8C9B;margin:4px 0 0">Validation budgétaire IBTIKAR · Facturation GENOCLAB</p></div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="margin-bottom:24px"><h2 style="color:#1B2838;margin:0">💰 {t("welcome_finance")}</h2><p style="color:#7F8C9B;margin:4px 0 0">{t("validation")} IBTIKAR · {t("invoices")} GENOCLAB</p></div>', unsafe_allow_html=True)
 
     budget = get_budget_dashboard()
     invoices = get_all_invoices()
     ibk = budget.get("ibtikar", {})
     gcl = budget.get("genoclab", {})
     c1,c2,c3,c4 = st.columns(4)
-    with c1: render_kpi_card("🏛", fmt_currency(ibk.get('total',0)), f"IBTIKAR virtuel", "orange")
-    with c2: render_kpi_card("🧬", fmt_currency(gcl.get('total',0)), "GENOCLAB réel", "green")
-    with c3: render_kpi_card("🧾", str(gcl.get('count',0)), "Factures", "teal")
-    with c4: render_kpi_card("🎓", str(ibk.get('students',0)), "Étudiants IBTIKAR", "purple")
+    with c1: render_kpi_card("🏛", fmt_currency(ibk.get('total',0)), f"IBTIKAR {t('revenue_virtual')}", "orange")
+    with c2: render_kpi_card("🧬", fmt_currency(gcl.get('total',0)), f"GENOCLAB {t('revenue_real')}", "green")
+    with c3: render_kpi_card("🧾", str(gcl.get('count',0)), t("invoices"), "teal")
+    with c4: render_kpi_card("🎓", str(ibk.get('students',0)), t("students"), "purple")
     st.markdown("<br/>", unsafe_allow_html=True)
 
-    tabs = st.tabs(["🏦 Validation IBTIKAR", "📊 Budget", "🧾 Factures GENOCLAB", "📈 Archives", "📜 Historique"])
+    tabs = st.tabs([f"🏦 {t('validation')} IBTIKAR", f"📊 {t('budget')}", f"🧾 {t('invoices')} GENOCLAB", f"📈 {t('archives')}", f"📜 {t('audit')}"])
 
     # ── TAB 1: IBTIKAR BUDGET VALIDATION ──────────────────────────────────
     with tabs[0]:

@@ -24,6 +24,7 @@ st.set_page_config(
 )
 
 import config
+from utils.i18n import t
 from core.repository import ensure_data_directory
 
 # OPS-01: Health check endpoint via query params
@@ -69,7 +70,7 @@ else:
         elapsed = (datetime.now(timezone.utc) - last).total_seconds()
         if elapsed > config.SESSION_TIMEOUT_SECONDS:
             st.session_state.clear()
-            st.warning("⏰ Session expirée par inactivité. Veuillez vous reconnecter.")
+            st.warning(f"⏰ {t('session_expired')}")
             st.rerun()
     except Exception:
         pass

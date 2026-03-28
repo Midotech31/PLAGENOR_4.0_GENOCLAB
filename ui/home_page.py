@@ -15,6 +15,7 @@ from core.audit_engine import log_action
 from ui.styles import get_global_css, get_login_css
 from services.registry_loader import load_service_registry
 from utils import sanitize_html as _escape_html
+from utils.i18n import t, get_lang, set_lang
 
 _ASSETS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
 
@@ -50,11 +51,19 @@ def render_home_page():
 
     # ── SIDEBAR ──
     with st.sidebar:
+        # Language switcher
+        current_lang = get_lang()
+        switch_label = t("lang_switch")
+        if st.button(f"🌐 {switch_label}", use_container_width=True, key="home_lang_toggle"):
+            new_lang = "en" if current_lang == "fr" else "fr"
+            set_lang(new_lang)
+            st.rerun()
+
         logo_p = _img("logo_plagenor.png")
         if logo_p: st.image(logo_p, use_container_width=True)
         st.markdown("---")
         logo_e = _img("logo_essbo.png")
-        if logo_e: st.image(logo_e, width=160)
+        if logo_e: st.image(logo_e, width=150)
         st.markdown('<div style="text-align:center;font-size:12px;color:#8899AA;line-height:1.7;margin-top:8px"><strong>ESSBO</strong> · Oran, Algérie<br/>École Supérieure en Sciences<br/>Biologiques d\'Oran<br/><br/><a href="http://www.essb-oran.edu.dz/index.php/fr/" target="_blank" style="color:#5DADE2">Site ESSBO</a> · <a href="https://genoclab.my.canva.site/genoclab-essbo" target="_blank" style="color:#1ABC9C">GENOCLAB</a> · <a href="https://ibtikar.dgrsdt.dz/" target="_blank" style="color:#F39C12">IBTIKAR</a><br/><br/>© 2026 Prof. Mohamed Merzoug</div>', unsafe_allow_html=True)
 
     # ── NAVIGATION ──
@@ -62,15 +71,15 @@ def render_home_page():
     with nav[0]: st.markdown('<div style="font-size:20px;font-weight:800;color:#1A202C;padding-top:6px">🧬 PLAGENOR</div>', unsafe_allow_html=True)
     section = st.session_state.get("home_section", "home")
     with nav[1]:
-        if st.button("🏠 Accueil", use_container_width=True, key="nav_home"): section = "home"
+        if st.button(f"🏠 {t('home')}", use_container_width=True, key="nav_home"): section = "home"
     with nav[2]:
-        if st.button("🔬 Services", use_container_width=True, key="nav_svc"): section = "services"
+        if st.button(f"🔬 {t('services')}", use_container_width=True, key="nav_svc"): section = "services"
     with nav[3]:
-        if st.button("ℹ️ À propos", use_container_width=True, key="nav_about"): section = "about"
+        if st.button(f"ℹ️ {t('about')}", use_container_width=True, key="nav_about"): section = "about"
     with nav[4]:
-        if st.button("🔐 Connexion", use_container_width=True, key="nav_login"): section = "login"
+        if st.button(f"🔐 {t('login')}", use_container_width=True, key="nav_login"): section = "login"
     with nav[5]:
-        if st.button("🔍 Suivi", use_container_width=True, key="nav_track"): section = "track"
+        if st.button(f"🔍 {t('track')}", use_container_width=True, key="nav_track"): section = "track"
     st.session_state["home_section"] = section
     st.markdown("<br/>", unsafe_allow_html=True)
 
@@ -90,12 +99,12 @@ def _section_home():
     c1, c2, c3 = st.columns([1.2, 2.5, 1.2])
     with c1:
         lp = _img("logo_ibtikar.png") or _img("IBTIKAR Logo.png")
-        if lp: st.image(lp, width=200)
+        if lp: st.image(lp, width=220)
     with c2:
         st.markdown('<div style="text-align:center;padding:10px 0"><div style="font-size:44px;font-weight:800;color:#1A202C;letter-spacing:2px;line-height:1.2">PLAGENOR 4.0</div><div style="font-size:17px;color:#64748B;margin-top:8px;font-weight:500">Plateforme Technologique de Génomique — ESSBO · ORAN</div></div>', unsafe_allow_html=True)
     with c3:
         lg = _img("logo_genoclab.png") or _img("GENOCLAB Logo.png")
-        if lg: st.image(lg, width=200)
+        if lg: st.image(lg, width=220)
     st.markdown("<br/>", unsafe_allow_html=True)
 
     # Two channel cards — BIGGER text and padding
@@ -109,13 +118,13 @@ def _section_home():
     # CTAs
     c1, c2, c3 = st.columns(3)
     with c1:
-        if st.button("📋 Soumettre une demande", use_container_width=True, type="primary", key="cta1"):
+        if st.button(f"📋 {t('submit')}", use_container_width=True, type="primary", key="cta1"):
             st.session_state["home_section"] = "login"; st.rerun()
     with c2:
-        if st.button("🔬 Voir les services", use_container_width=True, key="cta2"):
+        if st.button(f"🔬 {t('services')}", use_container_width=True, key="cta2"):
             st.session_state["home_section"] = "services"; st.rerun()
     with c3:
-        if st.button("🔍 Suivre ma demande", use_container_width=True, key="cta3"):
+        if st.button(f"🔍 {t('track')}", use_container_width=True, key="cta3"):
             st.session_state["home_section"] = "track"; st.rerun()
     st.markdown("<br/>", unsafe_allow_html=True)
 
@@ -182,11 +191,48 @@ def _section_services():
 
 
 def _section_about():
-    st.markdown('<div style="max-width:700px;margin:0 auto"><div style="text-align:center;font-size:24px;font-weight:700;color:#1A202C;margin-bottom:20px">À propos de PLAGENOR</div><div style="font-size:14px;color:#4A5568;line-height:1.9"><strong style="color:#1A202C;font-size:16px">PLAGENOR 4.0</strong> est la Plateforme Technologique de Génomique de l\'<strong style="color:#0E8C7F">ESSBO</strong> (École Supérieure en Sciences Biologiques d\'Oran).<br/><br/>Services avancés : identification microbienne MALDI-TOF, séquençage Sanger et Illumina, PCR, contrôle qualité acides nucléiques, lyophilisation, synthèse d\'amorces.<br/><br/><strong style="color:#F39C12">IBTIKAR</strong> — Financement DGRSDT : 200 000 DA/an pour étudiants de toutes les universités algériennes.<br/><br/><strong style="color:#0E8C7F">GENOCLAB</strong> — Prestations externes : devis personnalisé, TVA 19%.<br/><br/><strong style="color:#1A202C">Contact :</strong> Prof. Mohamed Merzoug · <a href="mailto:mohamed.merzoug.essbo@gmail.com" style="color:#2E86C1">mohamed.merzoug.essbo@gmail.com</a> · 041 24 63 59<br/>📍 Cité Emir Abdelkader, 31000 Oran</div></div>', unsafe_allow_html=True)
+    lang = get_lang()
+    if lang == "en":
+        about_html = """<div style="max-width:700px;margin:0 auto">
+<div style="text-align:center;font-size:24px;font-weight:700;color:#1A202C;margin-bottom:20px">About PLAGENOR</div>
+<div style="font-size:14px;color:#4A5568;line-height:1.9">
+<strong style="color:#0E8C7F">ESSBO</strong> (École Supérieure en Sciences Biologiques d'Oran) hosts <strong style="color:#1A202C;font-size:16px">PLAGENOR</strong>, a <em>service commun de recherche</em> (shared research facility) funded by the <strong>DGRSDT</strong> (Direction Générale de la Recherche Scientifique et du Développement Technologique).<br/><br/>
+
+PLAGENOR hosts <strong style="color:#0E8C7F">GENOCLAB</strong>, the commercial subsidiary (<em>filiale commerciale SPA</em>) of ESSBO, governed by Algerian commercial code (SPA).<br/><br/>
+
+<strong style="color:#1A202C;font-size:16px">PLAGENOR 4.0</strong> is the digital management platform for all PLAGENOR activities — acting as an internal ERP to organize workflows, manage IBTIKAR requests, and manage GENOCLAB clients.<br/><br/>
+
+<strong style="color:#1A202C">Two missions:</strong><br/>
+&nbsp;&nbsp;1. <strong style="color:#F39C12">IBTIKAR-DGRSDT</strong> — Genomic analyses for Algerian students (Master, Engineering, Doctorate). Students register on <a href="https://ibtikar.dgrsdt.dz/" target="_blank" style="color:#F39C12">ibtikar.dgrsdt.dz</a> and submit requests there; PLAGENOR receives these requests via its IBTIKAR account. Budget: 200,000 DA/year per student.<br/>
+&nbsp;&nbsp;2. <strong style="color:#0E8C7F">GENOCLAB</strong> — Commercial genomic analyses for enterprises, hospitals, laboratories, external researchers, and individuals. Custom quotes, 19% VAT, payment before analysis.<br/><br/>
+
+<strong style="color:#1A202C">Services:</strong> Microbial identification (MALDI-TOF), Sanger &amp; Illumina sequencing, PCR, nucleic acid quality control, lyophilization, primer synthesis.<br/><br/>
+
+<strong style="color:#1A202C">Contact:</strong> Prof. Mohamed Merzoug · <a href="mailto:mohamed.merzoug.essbo@gmail.com" style="color:#2E86C1">mohamed.merzoug.essbo@gmail.com</a> · 041 24 63 59<br/>📍 Cité Emir Abdelkader, 31000 Oran
+</div></div>"""
+    else:
+        about_html = """<div style="max-width:700px;margin:0 auto">
+<div style="text-align:center;font-size:24px;font-weight:700;color:#1A202C;margin-bottom:20px">À propos de PLAGENOR</div>
+<div style="font-size:14px;color:#4A5568;line-height:1.9">
+L'<strong style="color:#0E8C7F">ESSBO</strong> (École Supérieure en Sciences Biologiques d'Oran) héberge <strong style="color:#1A202C;font-size:16px">PLAGENOR</strong>, un <em>service commun de recherche</em> financé par la <strong>DGRSDT</strong> (Direction Générale de la Recherche Scientifique et du Développement Technologique).<br/><br/>
+
+PLAGENOR héberge <strong style="color:#0E8C7F">GENOCLAB</strong>, la filiale commerciale (SPA) de l'ESSBO, régie par le code de commerce algérien.<br/><br/>
+
+<strong style="color:#1A202C;font-size:16px">PLAGENOR 4.0</strong> est la plateforme numérique de gestion de toutes les activités de PLAGENOR — agissant comme un ERP interne pour organiser les flux de travail, gérer les demandes IBTIKAR et les clients GENOCLAB.<br/><br/>
+
+<strong style="color:#1A202C">Deux missions :</strong><br/>
+&nbsp;&nbsp;1. <strong style="color:#F39C12">IBTIKAR-DGRSDT</strong> — Analyses génomiques pour les étudiants algériens (Master, Ingéniorat, Doctorat). Les étudiants s'inscrivent sur <a href="https://ibtikar.dgrsdt.dz/" target="_blank" style="color:#F39C12">ibtikar.dgrsdt.dz</a> et y soumettent leurs demandes ; PLAGENOR reçoit ces demandes via son compte IBTIKAR. Budget : 200 000 DA/an par étudiant.<br/>
+&nbsp;&nbsp;2. <strong style="color:#0E8C7F">GENOCLAB</strong> — Analyses génomiques commerciales pour entreprises, hôpitaux, laboratoires, chercheurs externes et particuliers. Devis personnalisé, TVA 19%, paiement avant analyse.<br/><br/>
+
+<strong style="color:#1A202C">Services :</strong> Identification microbienne (MALDI-TOF), séquençage Sanger &amp; Illumina, PCR, contrôle qualité des acides nucléiques, lyophilisation, synthèse d'amorces.<br/><br/>
+
+<strong style="color:#1A202C">Contact :</strong> Prof. Mohamed Merzoug · <a href="mailto:mohamed.merzoug.essbo@gmail.com" style="color:#2E86C1">mohamed.merzoug.essbo@gmail.com</a> · 041 24 63 59<br/>📍 Cité Emir Abdelkader, 31000 Oran
+</div></div>"""
+    st.markdown(about_html, unsafe_allow_html=True)
 
 
 def _section_login():
-    tabs = st.tabs(["🔐 Connexion", "📝 Créer un compte", "📬 Soumettre sans compte"])
+    tabs = st.tabs([f"🔐 {t('login')}", f"📝 {t('register')}", f"📬 {t('guest_submit')}"])
     with tabs[0]: _login()
     with tabs[1]: _register()
     with tabs[2]: _guest_submit()

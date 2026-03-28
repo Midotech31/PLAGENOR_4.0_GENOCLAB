@@ -19,6 +19,7 @@ from core.workflow_engine import transition, get_allowed_transitions
 from core.productivity_engine import compute_member_productivity
 from services.notification_service import get_user_notifications, get_unread_count
 from core.logger import get_logger
+from utils.i18n import t
 
 _log = get_logger("member_dashboard")
 
@@ -36,7 +37,7 @@ def _render_member_dashboard_inner(user):
     render_sidebar_user(user)
     unread = get_unread_count(user.get("id",""))
     badge = f" · 🔔 {unread}" if unread else ""
-    st.markdown(f'<div style="margin-bottom:24px"><h2 style="color:#1B2838;margin:0">🔬 Espace Analyste</h2><p style="color:#7F8C9B;margin:4px 0 0">Vos analyses et tâches{badge}</p></div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="margin-bottom:24px"><h2 style="color:#1B2838;margin:0">🔬 {t("welcome_member")}</h2><p style="color:#7F8C9B;margin:4px 0 0">{t("requests")}{badge}</p></div>', unsafe_allow_html=True)
     member = get_member_by_user_id(user.get("id",""))
     mid = member.get("id","") if member else ""
     if mid:
@@ -51,17 +52,17 @@ def _render_member_dashboard_inner(user):
     in_prog = [r for r in my_reqs if r.get("status") in ("ANALYSIS_STARTED","ANALYSIS_FINISHED","SAMPLE_RECEIVED")]
 
     c1,c2,c3,c4 = st.columns(4)
-    with c1: render_kpi_card("📋", len(my_reqs), "Assignées", "blue")
-    with c2: render_kpi_card("🔬", len(in_prog), "En cours", "orange")
-    with c3: render_kpi_card("✅", len(completed), "Complétées", "green")
-    with c4: render_kpi_card(prod.get("emoji","⚪"), f"{prod.get('score',0):.0f}%", "Productivité", "purple")
+    with c1: render_kpi_card("📋", len(my_reqs), t("assigned"), "blue")
+    with c2: render_kpi_card("🔬", len(in_prog), t("in_progress"), "orange")
+    with c3: render_kpi_card("✅", len(completed), t("completed"), "green")
+    with c4: render_kpi_card(prod.get("emoji","⚪"), f"{prod.get('score',0):.0f}%", t("productivity"), "purple")
     st.markdown("<br/>", unsafe_allow_html=True)
     if member:
         load, mx = member.get("current_load",0), member.get("max_load",config.DEFAULT_MAX_LOAD)
         render_progress_bar(load, mx, "blue", "Charge de travail")
     st.markdown("<br/>", unsafe_allow_html=True)
 
-    tabs = st.tabs(["⏳ En attente","🔬 En cours","✅ Historique","🏆 Points & Cheers","🔔 Notifications"])
+    tabs = st.tabs([f"⏳ {t('pending')}",f"🔬 {t('in_progress')}",f"✅ {t('completed')}",f"🏆 {t('points_cheers')}",f"🔔 {t('notifications')}"])
     with tabs[0]:
         if not pending: render_empty_state("✅","Aucune tâche en attente")
         else:

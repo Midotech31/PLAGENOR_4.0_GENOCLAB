@@ -29,6 +29,7 @@ from core.financial_engine import get_budget_dashboard
 from core.productivity_engine import recalculate_all, get_all_productivity_stats
 from services.notification_service import get_unread_count
 from core.logger import get_logger
+from utils.i18n import t
 
 _log = get_logger("super_admin_dashboard")
 
@@ -50,17 +51,17 @@ def _render_super_admin_dashboard_inner(user):
     render_sidebar_user(user)
     unread = get_unread_count(user.get("id", ""))
     badge = f" ({unread} nouvelles)" if unread > 0 else ""
-    st.markdown(f'<div style="margin-bottom:24px"><h2 style="color:#1B2838;margin:0">👑 Tableau de Bord Super Admin</h2><p style="color:#7F8C9B;margin:4px 0 0">Vue d\'ensemble de la plateforme{badge}</p></div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="margin-bottom:24px"><h2 style="color:#1B2838;margin:0">👑 {t("welcome_super_admin")}</h2><p style="color:#7F8C9B;margin:4px 0 0">{t("platform_overview")}{badge}</p></div>', unsafe_allow_html=True)
 
     stats = get_platform_stats()
     budget = get_budget_dashboard()
     c1,c2,c3,c4,c5,c6 = st.columns(6)
-    with c1: render_kpi_card("📋", stats["total_requests"], "Actives", "blue")
-    with c2: render_kpi_card("✅", stats["completed"], "Complétées", "green")
-    with c3: render_kpi_card("👥", stats["total_users"], "Utilisateurs", "purple")
-    with c4: render_kpi_card("🔬", stats["total_members"], "Analystes", "teal")
-    with c5: render_kpi_card("🏛", stats["ibtikar_active"], "IBTIKAR", "blue")
-    with c6: render_kpi_card("🧬", stats["genoclab_active"], "GENOCLAB", "teal")
+    with c1: render_kpi_card("📋", stats["total_requests"], t("active"), "blue")
+    with c2: render_kpi_card("✅", stats["completed"], t("completed"), "green")
+    with c3: render_kpi_card("👥", stats["total_users"], t("users"), "purple")
+    with c4: render_kpi_card("🔬", stats["total_members"], t("analysts"), "teal")
+    with c5: render_kpi_card("🏛", stats["ibtikar_active"], t("ibtikar"), "blue")
+    with c6: render_kpi_card("🧬", stats["genoclab_active"], t("genoclab"), "teal")
     st.markdown("<br/>", unsafe_allow_html=True)
 
     # ── SYMMETRIC REVENUE DISPLAY: IBTIKAR (virtual) | GENOCLAB (real) ──
@@ -68,19 +69,19 @@ def _render_super_admin_dashboard_inner(user):
     gcl = budget.get("genoclab", {})
     c1, c2 = st.columns(2)
     with c1:
-        section_header("Revenus IBTIKAR (virtuels)", "🏛")
+        section_header(f"{t('revenue_virtual')} IBTIKAR", "🏛")
         ca, cb, cc = st.columns(3)
-        with ca: render_kpi_card("💰", fmt_currency(ibk.get('total', 0)), "Chiffre d'affaires", "orange")
-        with cb: render_kpi_card("📋", str(ibk.get('count', 0)), "Demandes", "blue")
-        with cc: render_kpi_card("🎓", str(ibk.get('students', 0)), "Étudiants", "purple")
-        st.markdown(f'<div style="font-size:13px;color:#64748B;margin-top:8px">ℹ️ Budget : <strong>{fmt_currency(ibk.get("budget_per_student", 200000))}</strong> par étudiant / an (DGRSDT)</div>', unsafe_allow_html=True)
+        with ca: render_kpi_card("💰", fmt_currency(ibk.get('total', 0)), t("total_revenue"), "orange")
+        with cb: render_kpi_card("📋", str(ibk.get('count', 0)), t("requests"), "blue")
+        with cc: render_kpi_card("🎓", str(ibk.get('students', 0)), t("students"), "purple")
+        st.markdown(f'<div style="font-size:13px;color:#64748B;margin-top:8px">ℹ️ {t("budget")} : <strong>{fmt_currency(ibk.get("budget_per_student", 200000))}</strong> {t("per_student_year")} (DGRSDT)</div>', unsafe_allow_html=True)
     with c2:
-        section_header("Revenus GENOCLAB (réels)", "🧬")
+        section_header(f"{t('revenue_real')} GENOCLAB", "🧬")
         ca, cb = st.columns(2)
-        with ca: render_kpi_card("💵", fmt_currency(gcl.get('total', 0)), "Chiffre d'affaires", "green")
-        with cb: render_kpi_card("🧾", str(gcl.get('count', 0)), "Factures", "teal")
+        with ca: render_kpi_card("💵", fmt_currency(gcl.get('total', 0)), t("total_revenue"), "green")
+        with cb: render_kpi_card("🧾", str(gcl.get('count', 0)), t("invoices"), "teal")
 
-    tabs = st.tabs(["📋 Demandes","👥 Utilisateurs","🔬 Analystes","🧪 Services","📝 Formulaires","💳 Paiements","📊 Productivité","📄 Documents","📜 Audit","⚙️ Système"])
+    tabs = st.tabs([f"📋 {t('requests')}",f"👥 {t('users')}",f"🔬 {t('analysts')}",f"🧪 {t('services')}",f"📝 {t('forms')}",f"💳 {t('payments')}",f"📊 {t('productivity')}",f"📄 {t('documents')}",f"📜 {t('audit')}",f"⚙️ {t('system')}"])
     with tabs[0]: _tab_requests(user)
     with tabs[1]: _tab_users(user)
     with tabs[2]: _tab_members(user)
