@@ -1,0 +1,26 @@
+# ============================================================
+# PLAGENOR 4.0 — Cloudflare Tunnel Configuration Template
+# ============================================================
+# Steps to use this file:
+#   1. Run: cloudflared login
+#   2. Run: cloudflared tunnel create plagenor
+#   3. Note the Tunnel ID printed after step 2
+#   4. Replace <YOUR_TUNNEL_ID> with that ID below
+#   5. Replace <USERNAME> with your Windows username
+#   6. Replace <YOUR_DOMAIN> with your actual domain (e.g. plagenor.example.com)
+#   7. Run: cloudflared tunnel route dns plagenor <YOUR_DOMAIN>
+#   8. Copy this file to: C:\Users\<USERNAME>\.cloudflared\config.yml
+#   9. Test: cloudflared tunnel --config cloudflare\config.yml run plagenor
+#  10. Install as service: cloudflared service install
+# ============================================================
+
+tunnel: <YOUR_TUNNEL_ID>
+credentials-file: C:\Users\<USERNAME>\.cloudflared\<YOUR_TUNNEL_ID>.json
+
+ingress:
+  - hostname: <YOUR_DOMAIN>
+    service: http://localhost:8501
+    originRequest:
+      connectTimeout: 30s
+      noTLSVerify: false
+  - service: http_status:404
