@@ -47,6 +47,12 @@ if "authenticated" not in st.session_state:
 if "user" not in st.session_state:
     st.session_state["user"] = None
 
+# ── Report viewing via token link ────────────────────────────────────────────
+if st.query_params.get("report"):
+    from ui.report_viewer import render_report_viewer
+    render_report_viewer(st.query_params["report"])
+    st.stop()
+
 # ── Unauthenticated → Login ──────────────────────────────────────────────────
 if not st.session_state.get("authenticated"):
     from ui.home_page import render_home_page

@@ -76,14 +76,25 @@ def _render_client_dashboard_inner(user):
         with st.form("cl_req_form"):
             st.markdown("#### Informations")
             c1,c2 = st.columns(2)
-            with c1: cl_org = st.text_input("Organisation *"); cl_contact = st.text_input("Contact (email/tél) *")
-            with c2: cl_urgency = st.selectbox("Urgence", ["Normal","Urgent","Très urgent"]); cl_desc = st.text_area("Description *", height=80)
+            with c1:
+                cl_org = st.text_input("Organisation *", help="Nom de votre entreprise, laboratoire ou institution")
+                cl_contact = st.text_input("Contact (email/tél) *", help="Entrez une adresse email valide (ex: nom@universite.dz) ou un numéro de téléphone")
+            with c2:
+                cl_urgency = st.selectbox("Urgence", ["Normal","Urgent","Très urgent"])
+                cl_desc = st.text_area("Description *", height=80, help="Décrivez brièvement l'objectif de votre demande d'analyse")
             st.markdown("#### Paramètres du service")
             svc_params = render_service_params(svc_def, prefix="cl_p")
             if st.form_submit_button("Continuer →", use_container_width=True, type="primary"):
+                _valid = True
                 if not cl_org.strip() or not cl_contact.strip() or not cl_desc.strip():
                     st.warning("Champs * obligatoires.")
-                else:
+                    _valid = False
+                elif "@" in cl_contact.strip():
+                    from utils.validation import is_valid_email
+                    if not is_valid_email(cl_contact.strip()):
+                        st.error("Adresse email invalide. Vérifiez le format.")
+                        _valid = False
+                if _valid:
                     st.session_state["cl_ready"] = True
                     st.session_state["cl_svc_code"] = sel_code
                     st.session_state["cl_params"] = svc_params

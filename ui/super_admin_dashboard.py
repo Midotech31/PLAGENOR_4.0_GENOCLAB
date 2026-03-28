@@ -82,7 +82,7 @@ def _render_super_admin_dashboard_inner(user):
         with ca: render_kpi_card("💵", fmt_currency(gcl.get('total', 0)), t("total_revenue"), "green")
         with cb: render_kpi_card("🧾", str(gcl.get('count', 0)), t("invoices"), "teal")
 
-    tabs = st.tabs([f"📋 {t('requests')}",f"👥 {t('users')}",f"🔬 {t('analysts')}",f"🧪 {t('services')}",f"📝 {t('forms')}",f"💳 {t('payments')}",f"📊 {t('productivity')}",f"📄 {t('documents')}",f"📜 {t('audit')}",f"⚙️ {t('system')}"])
+    tabs = st.tabs([f"📋 {t('requests')}",f"👥 {t('users')}",f"🔬 {t('analysts')}",f"🧪 {t('services')}",f"📝 {t('forms')}",f"💳 {t('payments')}",f"📊 {t('productivity')}",f"📄 {t('documents')}",f"📜 {t('audit')}","📝 Contenu",f"⚙️ {t('system')}"])
     with tabs[0]: _tab_requests(user)
     with tabs[1]: _tab_users(user)
     with tabs[2]: _tab_members(user)
@@ -92,7 +92,8 @@ def _render_super_admin_dashboard_inner(user):
     with tabs[6]: _tab_productivity()
     with tabs[7]: _tab_documents(user)
     with tabs[8]: _tab_audit()
-    with tabs[9]: _tab_system(user)
+    with tabs[9]: _tab_content(user)
+    with tabs[10]: _tab_system(user)
 
 def _tab_requests(user):
     requests = get_all_active_requests()
@@ -345,8 +346,10 @@ def _tab_services(user):
                 sp_gcl = st.number_input("Prix GENOCLAB (DZD)", value=0.0, key="new_sp_gcl")
             sd = st.number_input("Délai (j)", value=7, min_value=1)
             sdesc = st.text_area("Description")
+            svc_image = st.file_uploader("Image du service (PNG)", type=["png"], key="new_svc_img")
             if st.form_submit_button("✅ Ajouter", type="primary"):
                 if sn:
+                    import os
                     channel_val = config.CHANNEL_IBTIKAR if s_avail == "IBTIKAR" else config.CHANNEL_GENOCLAB if s_avail == "GENOCLAB" else config.CHANNEL_IBTIKAR
                     sv = {
                         "id": str(uuid.uuid4()),
@@ -361,6 +364,13 @@ def _tab_services(user):
                         "turnaround_days": sd, "active": True,
                         "created_at": datetime.now(timezone.utc).isoformat(),
                     }
+                    if svc_image:
+                        img_dir = os.path.join(config.DATA_DIR, "service_images")
+                        os.makedirs(img_dir, exist_ok=True)
+                        img_path = os.path.join(img_dir, f"{sv['id']}.png")
+                        with open(img_path, "wb") as f:
+                            f.write(svc_image.getbuffer())
+                        sv["image_path"] = img_path
                     save_service(sv); log_action("SERVICE_CREATED","SERVICE",sv["id"],actor=user)
                     st.success(f"✅ {sn} ajouté"); st.rerun()
     # ── Filter ──
@@ -400,7 +410,16 @@ def _tab_services(user):
                     e_td = st.number_input("Délai (j)", value=int(s.get("turnaround_days") or 7), min_value=1, key=f"et_{s['id']}")
                     e_gcl = st.number_input("Prix GENOCLAB (DZD)", value=float(s.get("genoclab_price") or s.get("base_price") or 0), key=f"epg_{s['id']}")
                 e_active = st.checkbox("Actif", value=s.get("active",True), key=f"eact_{s['id']}")
+                e_svc_img = st.file_uploader("Image du service (PNG)", type=["png"], key=f"eimg_{s['id']}")
                 if st.form_submit_button("💾 Sauvegarder", type="primary"):
+                    import os
+                    if e_svc_img:
+                        img_dir = os.path.join(config.DATA_DIR, "service_images")
+                        os.makedirs(img_dir, exist_ok=True)
+                        img_path = os.path.join(img_dir, f"{s['id']}.png")
+                        with open(img_path, "wb") as f:
+                            f.write(e_svc_img.getbuffer())
+                        s["image_path"] = img_path
                     s["name"] = e_name.strip(); s["description"] = e_desc.strip()
                     s["channel_availability"] = e_avail
                     s["channel"] = config.CHANNEL_IBTIKAR if e_avail == "IBTIKAR" else config.CHANNEL_GENOCLAB if e_avail == "GENOCLAB" else s.get("channel", config.CHANNEL_IBTIKAR)
@@ -607,6 +626,29 @@ def _tab_audit():
         username = _esc(e.get("actor_username","system"))
         st.markdown(f'<div style="padding:6px 12px;border-left:3px solid #E8ECF1;margin-bottom:4px;font-size:13px">{icon} <strong>{a}</strong> <span style="color:#7F8C9B;margin-left:8px">par {username}</span> <span style="color:#ABB2B9;margin-left:8px">{fmt_datetime(e.get("timestamp",""))}</span></div>', unsafe_allow_html=True)
 
+def _tab_content(user):
+    from core.repository import get_content, save_content
+    section_header("Gestion du contenu", "📝")
+    st.info("Modifiez les textes affichés sur la plateforme.")
+    content_keys = [
+        ("home_title", "Titre page d'accueil", "PLAGENOR 4.0"),
+        ("home_subtitle", "Sous-titre", "Plateforme Technologique de Génomique — ESSBO · ORAN"),
+        ("ibtikar_description", "Description IBTIKAR", "Programme national de soutien à la recherche scientifique..."),
+        ("genoclab_description", "Description GENOCLAB", "Laboratoire de services génomiques..."),
+        ("about_text", "Texte À propos", "..."),
+        ("footer_text", "Texte pied de page", "© 2026 Prof. Mohamed Merzoug..."),
+        ("thank_you_message", "Message de remerciement (rapport)", "Merci pour votre confiance!"),
+    ]
+    for key, label, default in content_keys:
+        current = get_content(key, default)
+        new_val = st.text_area(label, value=current, key=f"cms_{key}", height=100)
+        if new_val != current:
+            if st.button(f"💾 Sauvegarder", key=f"cms_save_{key}"):
+                save_content(key, new_val, user.get("id", ""))
+                st.success(f"✅ {label} mis à jour")
+                st.rerun()
+
+
 def _tab_system(user):
     section_header("Système", "⚙️")
     c1,c2,c3 = st.columns(3)
@@ -624,6 +666,21 @@ def _tab_system(user):
             except Exception as e:
                 st.error(f"❌ {e}")
     with c2:
+        import os
+        st.markdown("#### 📄 Modèle Note Plateforme")
+        template_dir = os.path.join(config.DATA_DIR, "templates")
+        os.makedirs(template_dir, exist_ok=True)
+        template_path = os.path.join(template_dir, "note_plateforme_template.docx")
+        uploaded_template = st.file_uploader("Charger un modèle DOCX", type=["docx"], key="note_template")
+        if uploaded_template:
+            with open(template_path, "wb") as f:
+                f.write(uploaded_template.getbuffer())
+            st.success("Modèle mis à jour!")
+        if os.path.exists(template_path):
+            st.success("✅ Modèle personnalisé chargé")
+            with open(template_path, "rb") as f:
+                st.download_button("⬇️ Télécharger le modèle actuel", f.read(), file_name="note_plateforme_template.docx")
+        st.markdown("---")
         st.markdown("#### 📊 Stats")
         s = get_platform_stats()
         st.write(f"👥 {s['total_users']} utilisateurs · 🔬 {s['total_members']} analystes")

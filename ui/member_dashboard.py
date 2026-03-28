@@ -63,7 +63,7 @@ def _render_member_dashboard_inner(user):
         render_progress_bar(load, mx, "blue", "Charge de travail")
     st.markdown("<br/>", unsafe_allow_html=True)
 
-    tabs = st.tabs([f"⏳ {t('pending')}",f"🔬 {t('in_progress')}",f"✅ {t('completed')}",f"🏆 {t('points_cheers')}",f"🔔 {t('notifications')}"])
+    tabs = st.tabs([f"⏳ {t('pending')}",f"🔬 {t('in_progress')}",f"✅ {t('completed')}","👤 Mon Profil",f"🏆 {t('points_cheers')}",f"🔔 {t('notifications')}"])
     with tabs[0]:
         if not pending: render_empty_state("✅","Aucune tâche en attente")
         else:
@@ -105,6 +105,14 @@ def _render_member_dashboard_inner(user):
                     elif req.get("appointment_date"):
                         appt_confirmed = "✅" if req.get("appointment_confirmed") else "⏳"
                         st.info(f"📅 Rendez-vous: {req['appointment_date']} {appt_confirmed}")
+                    # ── Reception sheet ──
+                    if req.get("appointment_confirmed"):
+                        if st.button("📋 Fiche de réception", key=f"recv_{req['id']}"):
+                            from services.document_service import generate_sample_reception_sheet
+                            path = generate_sample_reception_sheet(req)
+                            if path and os.path.exists(path):
+                                with open(path, "rb") as f:
+                                    st.download_button("⬇️ Télécharger", f.read(), file_name=os.path.basename(path), key=f"recv_dl_{req['id']}")
                     # ── QR Code ──
                     qr_data = f"PLAGENOR-REQ:{req.get('display_id') or req.get('id','')}"
                     st.markdown(generate_qr_html(qr_data, size=120), unsafe_allow_html=True)
@@ -193,6 +201,33 @@ def _render_member_dashboard_inner(user):
         else:
             for req in completed[:20]: render_request_card(req)
     with tabs[3]:
+        # Member Profile
+        if member:
+            st.markdown(f"### {member.get('full_name', '')}")
+            st.write(f"**ID:** {member.get('id', '')[:8]}")
+            from core.repository import get_all_techniques
+            all_techs = get_all_techniques()
+            tech_names = [tc.get("name", "") for tc in all_techs]
+            current_techs = member.get("skills", [])
+            # skills may be stored as IDs or names — normalize to names
+            current_tech_names = []
+            for s in current_techs:
+                if s in tech_names:
+                    current_tech_names.append(s)
+                else:
+                    # Try to find by ID
+                    matched = [tc.get("name", "") for tc in all_techs if tc.get("id") == s]
+                    if matched:
+                        current_tech_names.append(matched[0])
+            selected = st.multiselect("Mes techniques", tech_names, default=[t_n for t_n in current_tech_names if t_n in tech_names])
+            if st.button("💾 Mettre à jour mes techniques", type="primary"):
+                member["skills"] = selected
+                save_member(member)
+                st.success("Techniques mises à jour!")
+                st.rerun()
+        else:
+            render_empty_state("👤", "Profil analyste non trouvé")
+    with tabs[4]:
         # Points & Cheers
         if mid:
             points_data = get_member_points(mid)
@@ -227,7 +262,7 @@ def _render_member_dashboard_inner(user):
                 render_empty_state("🏆","Aucun point ou encouragement pour le moment")
         else:
             render_empty_state("👤","Profil analyste non trouvé")
-    with tabs[4]:
+    with tabs[5]:
         notifs = get_user_notifications(user.get("id",""))
         if not notifs: render_empty_state("🔔","Aucune notification")
         else:

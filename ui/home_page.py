@@ -293,7 +293,7 @@ def _register():
         st.markdown('<div style="text-align:center;color:#718096;font-size:13px;margin-bottom:16px">Étudiants IBTIKAR et clients GENOCLAB</div>', unsafe_allow_html=True)
         with st.form("reg_form", clear_on_submit=True):
             rn = st.text_input("Nom complet *")
-            re_ = st.text_input("Email *")
+            re_ = st.text_input("Email *", help="Entrez une adresse email valide (ex: nom@universite.dz)")
             role = st.selectbox("Type de compte *", ["Demandeur IBTIKAR (étudiant/chercheur)", "Client GENOCLAB (externe)"])
             is_ibtikar = "IBTIKAR" in role
             if is_ibtikar:
@@ -305,12 +305,17 @@ def _register():
             else:
                 r_univ = st.text_input("Organisation *")
                 r_level = r_lab = r_sup = ""
-            rp = st.text_input("Téléphone")
+            rp = st.text_input("Téléphone", help="Format: 0X XX XX XX XX ou +213 X XX XX XX XX")
             ru = st.text_input("Identifiant souhaité *")
             rpw = st.text_input("Mot de passe *", type="password")
             if st.form_submit_button("Créer mon compte", use_container_width=True, type="primary"):
                 if not rn.strip() or not re_.strip() or not ru.strip() or not rpw or len(rpw) < config.MIN_PASSWORD_LENGTH:
                     st.warning(f"Champs * obligatoires. Mot de passe min {config.MIN_PASSWORD_LENGTH} car."); return
+                from utils.validation import is_valid_email, is_valid_phone
+                if re_.strip() and not is_valid_email(re_.strip()):
+                    st.error("Adresse email invalide. Vérifiez le format."); return
+                if rp.strip() and not is_valid_phone(rp.strip()):
+                    st.warning("Numéro de téléphone incomplet ou invalide.")
                 if not r_univ.strip(): st.warning("Université / Organisation obligatoire."); return
                 if is_ibtikar and not r_sup.strip(): st.warning("Directeur de recherche obligatoire."); return
                 if any(u.get("username")==ru.strip() for u in get_all_users()): st.error("Identifiant déjà pris."); return
@@ -341,9 +346,9 @@ def _guest_submit():
             gc1, gc2 = st.columns(2)
             with gc1:
                 gn = st.text_input("Nom complet *")
-                ge = st.text_input("Email *")
+                ge = st.text_input("Email *", help="Entrez une adresse email valide (ex: nom@universite.dz)")
             with gc2:
-                gp = st.text_input("Téléphone")
+                gp = st.text_input("Téléphone", help="Format: 0X XX XX XX XX ou +213 X XX XX XX XX")
                 go = st.text_input("Organisation")
             g_channel = st.selectbox("Canal *", ["GENOCLAB (externe)", "IBTIKAR (étudiant/chercheur)"])
             gs = st.selectbox("Service demandé *", ["— Sélectionner —"] + list(svc_labels.keys()))
@@ -365,6 +370,11 @@ def _guest_submit():
             if st.form_submit_button("📤 Soumettre la demande", use_container_width=True, type="primary"):
                 if not gn.strip() or not ge.strip() or gs == "— Sélectionner —":
                     st.warning("Nom, email et service sont obligatoires."); return
+                from utils.validation import is_valid_email, is_valid_phone
+                if ge.strip() and not is_valid_email(ge.strip()):
+                    st.error("Adresse email invalide. Vérifiez le format."); return
+                if gp.strip() and not is_valid_phone(gp.strip()):
+                    st.warning("Numéro de téléphone incomplet ou invalide.")
                 channel = config.CHANNEL_IBTIKAR if "IBTIKAR" in g_channel else config.CHANNEL_GENOCLAB
                 token = str(uuid.uuid4())  # SEC-05: full UUID for entropy
                 # ARCH-01/UX-01: Route through service layer for server-side validation

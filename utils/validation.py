@@ -18,6 +18,11 @@ def validate_phone(phone: str) -> bool:
     return bool(re.match(r'^[+\d\s\-().]{6,20}$', phone))
 
 
+# Aliases for convenience
+is_valid_email = validate_email
+is_valid_phone = validate_phone
+
+
 def validate_password_length(pw: str) -> bool:
     return len(pw) >= config.MIN_PASSWORD_LENGTH
 

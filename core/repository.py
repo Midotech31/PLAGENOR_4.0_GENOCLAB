@@ -86,7 +86,7 @@ def _row_to_dict(row: sqlite3.Row | None, json_fields: set | None = None) -> dic
               "self_registered", "receipt_confirmed", "submitted_as_guest",
               "guest_upgraded", "price_modified",
               "appointment_confirmed", "assignment_accepted", "assignment_declined",
-              "gift_unlocked", "gift_collected"):
+              "gift_unlocked", "gift_collected", "report_delivered"):
         if k in d and d[k] is not None:
             d[k] = bool(d[k])
     if json_fields:
@@ -329,6 +329,13 @@ CREATE TABLE IF NOT EXISTS techniques (
     active INTEGER DEFAULT 1,
     created_at TEXT DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS platform_content (
+    key TEXT PRIMARY KEY,
+    value TEXT DEFAULT '',
+    updated_at TEXT DEFAULT '',
+    updated_by TEXT DEFAULT ''
+);
 """
 
 _INDEXES_SQL = """
@@ -365,6 +372,10 @@ _EXTRA_COLUMNS = [
     ("members", "gift_unlocked", "INTEGER DEFAULT 0"),
     ("members", "gift_image", "TEXT DEFAULT ''"),
     ("members", "gift_collected", "INTEGER DEFAULT 0"),
+    ("requests", "report_token", "TEXT DEFAULT ''"),
+    ("requests", "report_delivered", "INTEGER DEFAULT 0"),
+    ("requests", "report_delivered_at", "TEXT DEFAULT ''"),
+    ("services", "image_path", "TEXT DEFAULT ''"),
 ]
 
 
@@ -831,6 +842,15 @@ def get_requests_by_guest_email(email):
     return [_row_to_dict(r, _JSON_FIELDS_REQUESTS) for r in rows]
 
 
+def get_request_by_report_token(token):
+    """Find a request by its report delivery token."""
+    if not token:
+        return None
+    db = _get_db()
+    row = db.execute("SELECT * FROM requests WHERE report_token=?", (token,)).fetchone()
+    return _row_to_dict(row, _JSON_FIELDS_REQUESTS)
+
+
 def link_guest_requests_to_client(email, client_id):
     """Link all guest submissions to a new CLIENT account."""
     db = _get_db()
@@ -1046,6 +1066,30 @@ def save_technique(technique):
 
 def delete_technique(technique_id):
     _delete("techniques", technique_id)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PLATFORM CONTENT (CMS)
+# ═══════════════════════════════════════════════════════════════════════════
+def get_content(key: str, default: str = "") -> str:
+    db = _get_db()
+    row = db.execute("SELECT value FROM platform_content WHERE key=?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def save_content(key: str, value: str, actor_id: str = ""):
+    db = _get_db()
+    db.execute(
+        "INSERT INTO platform_content (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at, updated_by=excluded.updated_by",
+        (key, value, datetime.now(timezone.utc).isoformat(), actor_id)
+    )
+    db.commit()
+
+
+def get_all_content() -> list:
+    db = _get_db()
+    return [dict(r) for r in db.execute("SELECT * FROM platform_content ORDER BY key").fetchall()]
 
 
 # ═══════════════════════════════════════════════════════════════════════════

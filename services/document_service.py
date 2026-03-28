@@ -258,6 +258,54 @@ def _fill_sample_table(doc, samples: list):
                 col_idx += 1  # Skip empty optional fields but advance column
 
 
+def generate_sample_reception_sheet(request: dict, appointment_date: str = "") -> str:
+    """Generate a sample reception DOCX from template."""
+    try:
+        from docx import Document
+
+        template_path = os.path.join(config.DATA_DIR, "templates", "sample_reception_template.docx")
+        if os.path.exists(template_path):
+            doc = Document(template_path)
+        else:
+            doc = Document()
+            doc.add_heading("Fiche de Réception d'Échantillons", level=1)
+            doc.add_heading("PLAGENOR — ESSBO", level=2)
+
+        # Add request info
+        table = doc.add_table(rows=8, cols=2)
+        table.style = 'Light Grid Accent 1'
+        fields = [
+            ("Référence", request.get("display_id", "")),
+            ("Service", request.get("service_code", "")),
+            ("Demandeur", request.get("requester_name", request.get("guest_name", ""))),
+            ("Canal", request.get("channel", "")),
+            ("Date RDV", appointment_date or request.get("appointment_date", "")),
+            ("Échantillons", str(request.get("sample_count", ""))),
+            ("Urgence", request.get("urgency", "Normal")),
+            ("Date de réception", "___/___/______"),
+        ]
+        for i, (label, value) in enumerate(fields):
+            table.rows[i].cells[0].text = label
+            table.rows[i].cells[1].text = str(value)
+
+        doc.add_paragraph("\n")
+        doc.add_paragraph("Observations: " + "_" * 40)
+        doc.add_paragraph("\n")
+        doc.add_paragraph("Signature du réceptionniste: ________________")
+        doc.add_paragraph("Signature du déposant: ________________")
+
+        # Save
+        out_dir = config.REPORTS_DIR
+        os.makedirs(out_dir, exist_ok=True)
+        filename = f"RECEPTION_{request.get('display_id', request.get('id', '')[:8])}.docx"
+        filepath = os.path.join(out_dir, filename)
+        doc.save(filepath)
+        return filepath
+    except Exception as e:
+        print(f"Sample reception sheet error: {e}")
+        return ""
+
+
 def generate_platform_note(request: dict, actor: dict, service: dict = None) -> str:
     """Generate Platform Note DOCX for admin validation."""
     try:

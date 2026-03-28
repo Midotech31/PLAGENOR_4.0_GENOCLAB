@@ -120,6 +120,14 @@ def _new_request_form(user):
     if save_step2:
         # Validate requester
         missing_req = [f["label"] for f in req_fields if f.get("required") and not requester_data.get(f["name"])]
+        # Validate email/phone
+        from utils.validation import is_valid_email, is_valid_phone
+        email_val = requester_data.get("email", "")
+        phone_val = requester_data.get("phone", "")
+        if email_val and not is_valid_email(email_val):
+            missing_req.append("Email invalide (vérifiez le format)")
+        if phone_val and not is_valid_phone(phone_val):
+            missing_req.append("Téléphone incomplet ou invalide")
         # Validate service params
         missing_svc = validate_required_fields(svc_params, svc_def)
         all_errors = [f"Champ demandeur: {m}" for m in missing_req] + missing_svc
@@ -152,7 +160,8 @@ def _new_request_form(user):
                 st.markdown("#### Déclaration de solde IBTIKAR")
                 declared_balance = st.number_input(
                     "Solde IBTIKAR déclaré (DZD)", value=200000.0, min_value=0.0,
-                    step=1000.0, key="ibk_balance"
+                    step=1000.0, key="ibk_balance",
+                    help="Consultez votre solde sur ibtikar.dgrsdt.dz"
                 )
                 st.info("ℹ️ Déclarez votre solde IBTIKAR actuel. Le système vérifiera que le coût ne dépasse pas votre solde.")
                 if pricing["total"] > declared_balance:

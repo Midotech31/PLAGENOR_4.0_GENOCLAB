@@ -232,6 +232,29 @@ def _pending(user):
                         except Exception as e:
                             st.error(f"❌ {e}")
 
+            # ── SEND REPORT TO REQUESTER ──
+            if req.get("status") == "REPORT_VALIDATED" and not req.get("report_token"):
+                import uuid as _uuid
+                if st.button("📧 Envoyer le rapport au demandeur", key=f"send_rpt_{req['id']}", type="primary"):
+                    token = str(_uuid.uuid4())
+                    req["report_token"] = token
+                    save_request(req)
+                    report_url = f"?report={token}"
+                    st.success(f"Lien de rapport généré: {report_url}")
+                    st.code(report_url)
+                    try:
+                        from services.notification_service import send_email_notification
+                        email = req.get("guest_email") or req.get("contact", "")
+                        if email:
+                            send_email_notification(
+                                email,
+                                f"Votre rapport PLAGENOR est prêt — {req.get('display_id','')}",
+                                f"Bonjour,\n\nVotre rapport d'analyse est prêt. Cliquez sur le lien pour le consulter.\n\nCordialement,\nPLAGENOR"
+                            )
+                            st.info(f"Email envoyé à {email}")
+                    except Exception:
+                        pass
+
             # ── COMMENTS ──
             st.markdown("---")
             st.markdown("##### 💬 Commentaires")
