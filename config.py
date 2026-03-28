@@ -149,6 +149,7 @@ SESSION_TIMEOUT_MINUTES = int(_os.environ.get("PLAGENOR_SESSION_TIMEOUT", "480")
 SESSION_TIMEOUT_SECONDS = SESSION_TIMEOUT_MINUTES * 60
 MAX_LOGIN_ATTEMPTS      = int(_os.environ.get("PLAGENOR_MAX_LOGIN",        "5"))
 MAX_UPLOAD_SIZE_MB      = int(_os.environ.get("PLAGENOR_MAX_UPLOAD_MB",   "50"))
+MIN_PASSWORD_LENGTH     = 8
 
 # ═══════════════════════════════════════════════════════════════════════════
 # UI
@@ -161,151 +162,45 @@ ALLOWED_REPORT_EXTENSIONS   = {".pdf",".docx",".xlsx",".csv",".zip",".fastq",".f
 ALLOWED_DOCUMENT_EXTENSIONS = {".pdf",".docx",".xlsx",".png",".jpg",".jpeg"}
 
 # ═══════════════════════════════════════════════════════════════════════════
-# IBTIKAR WORKFLOW
+# WORKFLOW STATES (authoritative transitions in core/state_machine.py)
 # ═══════════════════════════════════════════════════════════════════════════
-class IbtikarState:
-    SUBMITTED             = "SUBMITTED"
-    VALIDATION            = "VALIDATION"
-    VALIDATED             = "VALIDATION"
-    APPROVED              = "APPROVED"
-    REJECTED              = "REJECTED"
-    APPOINTMENT_SCHEDULED = "APPOINTMENT_SCHEDULED"
-    SAMPLE_RECEIVED       = "SAMPLE_RECEIVED"
-    SAMPLE_VERIFIED       = "SAMPLE_VERIFIED"
-    ASSIGNED              = "ASSIGNED"
-    PENDING_ACCEPTANCE    = "PENDING_ACCEPTANCE"
-    ANALYSIS_IN_PROGRESS  = "ANALYSIS_IN_PROGRESS"
-    IN_PROGRESS           = "ANALYSIS_IN_PROGRESS"
-    ANALYSIS_FINISHED     = "ANALYSIS_FINISHED"
-    REPORT_UPLOADED       = "REPORT_UPLOADED"
-    ADMIN_REVIEW          = "ADMIN_REVIEW"
-    REPORT_VALIDATED      = "REPORT_VALIDATED"
-    SENT_TO_REQUESTER     = "SENT_TO_REQUESTER"
-    COMPLETED             = "COMPLETED"
+TERMINAL_STATES = {"REJECTED", "COMPLETED", "QUOTE_REJECTED_BY_CLIENT", "CLOSED", "ARCHIVED"}
 
-    @classmethod
-    def all_states(cls):
-        return {v for k,v in vars(cls).items() if not k.startswith("_") and isinstance(v,str)}
+REJECTION_STATES = {"REJECTED", "QUOTE_REJECTED_BY_CLIENT", "CLOSED"}
 
-    @classmethod
-    def terminal_states(cls):
-        return {cls.REJECTED, cls.COMPLETED}
-
-IBTIKAR_TRANSITIONS = {
-    IbtikarState.SUBMITTED:             IbtikarState.VALIDATED,
-    IbtikarState.VALIDATED:             IbtikarState.APPROVED,
-    IbtikarState.APPROVED:              IbtikarState.APPOINTMENT_SCHEDULED,
-    IbtikarState.APPOINTMENT_SCHEDULED: IbtikarState.SAMPLE_RECEIVED,
-    IbtikarState.SAMPLE_RECEIVED:       IbtikarState.SAMPLE_VERIFIED,
-    IbtikarState.SAMPLE_VERIFIED:       IbtikarState.ASSIGNED,
-    IbtikarState.ASSIGNED:              IbtikarState.PENDING_ACCEPTANCE,
-    IbtikarState.PENDING_ACCEPTANCE:    IbtikarState.IN_PROGRESS,
-    IbtikarState.IN_PROGRESS:           IbtikarState.ANALYSIS_FINISHED,
-    IbtikarState.ANALYSIS_FINISHED:     IbtikarState.REPORT_UPLOADED,
-    IbtikarState.REPORT_UPLOADED:       IbtikarState.ADMIN_REVIEW,
-    IbtikarState.ADMIN_REVIEW:          IbtikarState.REPORT_VALIDATED,
-    IbtikarState.REPORT_VALIDATED:      IbtikarState.SENT_TO_REQUESTER,
-    IbtikarState.SENT_TO_REQUESTER:     IbtikarState.COMPLETED,
-    IbtikarState.REJECTED:              None,
-    IbtikarState.COMPLETED:             None,
-}
-
+# ARCH-02: Single source of truth for role-based transition permissions
 IBTIKAR_TRANSITION_ROLES = {
-    IbtikarState.SUBMITTED:             [ROLE_REQUESTER, ROLE_CLIENT],
-    IbtikarState.VALIDATED:             [ROLE_PLATFORM_ADMIN, ROLE_SUPER_ADMIN],
-    IbtikarState.REJECTED:              [ROLE_PLATFORM_ADMIN, ROLE_SUPER_ADMIN],
-    IbtikarState.APPROVED:              [ROLE_PLATFORM_ADMIN, ROLE_SUPER_ADMIN],
-    IbtikarState.APPOINTMENT_SCHEDULED: [ROLE_PLATFORM_ADMIN, ROLE_MEMBER, ROLE_SUPER_ADMIN],
-    IbtikarState.SAMPLE_RECEIVED:       [ROLE_PLATFORM_ADMIN, ROLE_MEMBER, ROLE_SUPER_ADMIN],
-    IbtikarState.SAMPLE_VERIFIED:       [ROLE_MEMBER, ROLE_PLATFORM_ADMIN, ROLE_SUPER_ADMIN],
-    IbtikarState.ASSIGNED:              [ROLE_PLATFORM_ADMIN, ROLE_SUPER_ADMIN],
-    IbtikarState.PENDING_ACCEPTANCE:    [ROLE_MEMBER],
-    IbtikarState.IN_PROGRESS:           [ROLE_MEMBER],
-    IbtikarState.ANALYSIS_FINISHED:     [ROLE_MEMBER],
-    IbtikarState.REPORT_UPLOADED:       [ROLE_MEMBER, ROLE_PLATFORM_ADMIN],
-    IbtikarState.ADMIN_REVIEW:          [ROLE_PLATFORM_ADMIN, ROLE_SUPER_ADMIN],
-    IbtikarState.REPORT_VALIDATED:      [ROLE_PLATFORM_ADMIN, ROLE_SUPER_ADMIN],
-    IbtikarState.SENT_TO_REQUESTER:     [ROLE_PLATFORM_ADMIN, ROLE_SUPER_ADMIN],
-    IbtikarState.COMPLETED:             [ROLE_PLATFORM_ADMIN, ROLE_SUPER_ADMIN],
+    "SUBMITTED": [ROLE_REQUESTER],
+    "VALIDATION_PEDAGOGIQUE": [ROLE_PLATFORM_ADMIN],
+    "VALIDATION_FINANCE": [ROLE_FINANCE, ROLE_PLATFORM_ADMIN],
+    "PLATFORM_NOTE_GENERATED": [ROLE_PLATFORM_ADMIN],
+    "ASSIGNED": [ROLE_PLATFORM_ADMIN],
+    "SAMPLE_RECEIVED": [ROLE_MEMBER, ROLE_PLATFORM_ADMIN],
+    "ANALYSIS_STARTED": [ROLE_MEMBER],
+    "ANALYSIS_FINISHED": [ROLE_MEMBER],
+    "REPORT_UPLOADED": [ROLE_MEMBER],
+    "REPORT_VALIDATED": [ROLE_PLATFORM_ADMIN],
+    "COMPLETED": [ROLE_PLATFORM_ADMIN],
+    "CLOSED": [ROLE_PLATFORM_ADMIN],
+    "REJECTED": [ROLE_PLATFORM_ADMIN, ROLE_FINANCE],
 }
-
-# ═══════════════════════════════════════════════════════════════════════════
-# GENOCLAB WORKFLOW
-# ═══════════════════════════════════════════════════════════════════════════
-class GenoClabState:
-    SUBMITTED                  = "SUBMITTED"
-    VALIDATED                  = "VALIDATED"
-    REJECTED                   = "REJECTED"
-    QUOTE_DRAFT                = "QUOTE_DRAFT"
-    QUOTE_SENT                 = "QUOTE_SENT"
-    QUOTE_VALIDATED_BY_CLIENT  = "QUOTE_VALIDATED_BY_CLIENT"
-    QUOTE_REJECTED_BY_CLIENT   = "QUOTE_REJECTED_BY_CLIENT"
-    INVOICE_GENERATED          = "INVOICE_GENERATED"
-    ASSIGNED                   = "ASSIGNED"
-    PENDING_ACCEPTANCE         = "PENDING_ACCEPTANCE"
-    IN_PROGRESS                = "IN_PROGRESS"
-    ANALYSIS_FINISHED          = "ANALYSIS_FINISHED"
-    REPORT_UPLOADED            = "REPORT_UPLOADED"
-    ADMIN_REVIEW               = "ADMIN_REVIEW"
-    REPORT_VALIDATED           = "REPORT_VALIDATED"
-    SENT_TO_CLIENT             = "SENT_TO_CLIENT"
-    COMPLETED                  = "COMPLETED"
-
-    @classmethod
-    def all_states(cls):
-        return {v for k,v in vars(cls).items() if not k.startswith("_") and isinstance(v,str)}
-
-    @classmethod
-    def terminal_states(cls):
-        return {cls.REJECTED, cls.QUOTE_REJECTED_BY_CLIENT, cls.COMPLETED}
-
-GENOCLAB_TRANSITIONS = {
-    GenoClabState.SUBMITTED:                 GenoClabState.VALIDATED,
-    GenoClabState.VALIDATED:                 GenoClabState.QUOTE_DRAFT,
-    GenoClabState.QUOTE_DRAFT:               GenoClabState.QUOTE_SENT,
-    GenoClabState.QUOTE_SENT:                GenoClabState.QUOTE_VALIDATED_BY_CLIENT,
-    GenoClabState.QUOTE_VALIDATED_BY_CLIENT: GenoClabState.INVOICE_GENERATED,
-    GenoClabState.INVOICE_GENERATED:         GenoClabState.ASSIGNED,
-    GenoClabState.ASSIGNED:                  GenoClabState.PENDING_ACCEPTANCE,
-    GenoClabState.PENDING_ACCEPTANCE:        GenoClabState.IN_PROGRESS,
-    GenoClabState.IN_PROGRESS:               GenoClabState.ANALYSIS_FINISHED,
-    GenoClabState.ANALYSIS_FINISHED:         GenoClabState.REPORT_UPLOADED,
-    GenoClabState.REPORT_UPLOADED:           GenoClabState.ADMIN_REVIEW,
-    GenoClabState.ADMIN_REVIEW:              GenoClabState.REPORT_VALIDATED,
-    GenoClabState.REPORT_VALIDATED:          GenoClabState.SENT_TO_CLIENT,
-    GenoClabState.SENT_TO_CLIENT:            GenoClabState.COMPLETED,
-    GenoClabState.REJECTED:                  None,
-    GenoClabState.QUOTE_REJECTED_BY_CLIENT:  None,
-    GenoClabState.COMPLETED:                 None,
-}
-
 GENOCLAB_TRANSITION_ROLES = {
-    GenoClabState.SUBMITTED:                 [ROLE_REQUESTER, ROLE_CLIENT],
-    GenoClabState.VALIDATED:                 [ROLE_PLATFORM_ADMIN, ROLE_SUPER_ADMIN],
-    GenoClabState.REJECTED:                  [ROLE_PLATFORM_ADMIN, ROLE_SUPER_ADMIN],
-    GenoClabState.QUOTE_DRAFT:               [ROLE_PLATFORM_ADMIN, ROLE_SUPER_ADMIN],
-    GenoClabState.QUOTE_SENT:                [ROLE_PLATFORM_ADMIN, ROLE_SUPER_ADMIN],
-    GenoClabState.QUOTE_VALIDATED_BY_CLIENT: [ROLE_CLIENT, ROLE_REQUESTER],
-    GenoClabState.QUOTE_REJECTED_BY_CLIENT:  [ROLE_CLIENT, ROLE_REQUESTER],
-    GenoClabState.INVOICE_GENERATED:         [],
-    GenoClabState.ASSIGNED:                  [ROLE_PLATFORM_ADMIN, ROLE_SUPER_ADMIN],
-    GenoClabState.PENDING_ACCEPTANCE:        [ROLE_MEMBER],
-    GenoClabState.IN_PROGRESS:               [ROLE_MEMBER],
-    GenoClabState.ANALYSIS_FINISHED:         [ROLE_MEMBER],
-    GenoClabState.REPORT_UPLOADED:           [ROLE_MEMBER, ROLE_PLATFORM_ADMIN],
-    GenoClabState.ADMIN_REVIEW:              [ROLE_PLATFORM_ADMIN, ROLE_SUPER_ADMIN],
-    GenoClabState.REPORT_VALIDATED:          [ROLE_PLATFORM_ADMIN, ROLE_SUPER_ADMIN],
-    GenoClabState.SENT_TO_CLIENT:            [ROLE_PLATFORM_ADMIN, ROLE_SUPER_ADMIN],
-    GenoClabState.COMPLETED:                 [ROLE_PLATFORM_ADMIN, ROLE_SUPER_ADMIN],
-}
-
-TERMINAL_STATES = {
-    IbtikarState.REJECTED, IbtikarState.COMPLETED,
-    GenoClabState.REJECTED, GenoClabState.QUOTE_REJECTED_BY_CLIENT, GenoClabState.COMPLETED,
-}
-
-REJECTION_STATES = {
-    IbtikarState.REJECTED, GenoClabState.REJECTED, GenoClabState.QUOTE_REJECTED_BY_CLIENT,
+    "REQUEST_CREATED": [ROLE_CLIENT],
+    "QUOTE_DRAFT": [ROLE_PLATFORM_ADMIN],
+    "QUOTE_SENT": [ROLE_PLATFORM_ADMIN],
+    "QUOTE_VALIDATED_BY_CLIENT": [ROLE_CLIENT],
+    "QUOTE_REJECTED_BY_CLIENT": [ROLE_CLIENT],
+    "INVOICE_GENERATED": [ROLE_FINANCE, ROLE_PLATFORM_ADMIN],
+    "PAYMENT_CONFIRMED": [ROLE_FINANCE],
+    "ASSIGNED": [ROLE_PLATFORM_ADMIN],
+    "SAMPLE_RECEIVED": [ROLE_MEMBER, ROLE_PLATFORM_ADMIN],
+    "ANALYSIS_STARTED": [ROLE_MEMBER],
+    "ANALYSIS_FINISHED": [ROLE_MEMBER],
+    "REPORT_UPLOADED": [ROLE_MEMBER],
+    "REPORT_VALIDATED": [ROLE_PLATFORM_ADMIN],
+    "COMPLETED": [ROLE_PLATFORM_ADMIN],
+    "ARCHIVED": [ROLE_PLATFORM_ADMIN],
+    "REJECTED": [ROLE_PLATFORM_ADMIN, ROLE_FINANCE],
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -345,10 +240,7 @@ STATUS_LABELS = {
     "REQUEST_CREATED":        ("📥","Demande Créée","#3498DB"),
     "PAYMENT_CONFIRMED":      ("💳","Paiement Confirmé","#27AE60"),
     "ARCHIVED":               ("📦","Archivé","#95A5A6"),
-    "SAMPLE_RECEIVED":        ("📦","Échantillon Reçu","#16A085"),
     "ANALYSIS_STARTED":       ("🔬","Analyse Démarrée","#D35400"),
-    "ANALYSIS_FINISHED":      ("🧪","Analyse Terminée","#117A65"),
-    "REPORT_VALIDATED":       ("📋","Rapport Validé","#1E8449"),
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -405,3 +297,19 @@ GENOCLAB_STATES = [
     "ANALYSIS_STARTED", "ANALYSIS_FINISHED", "REPORT_UPLOADED",
     "REPORT_VALIDATED", "COMPLETED", "ARCHIVED", "REJECTED",
 ]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# STARTUP VALIDATION
+# ═══════════════════════════════════════════════════════════════════════════
+def validate_config():
+    """Validate configuration at startup. Logs warnings for common misconfigurations."""
+    import logging
+    _clog = logging.getLogger("plagenor.config")
+    warnings = []
+    if SMTP_ENABLED and not SMTP_PASSWORD:
+        warnings.append("SMTP enabled but PLAGENOR_SMTP_PASSWORD not set — emails will fail")
+    if not _os.access(DATA_DIR, _os.W_OK):
+        raise RuntimeError(f"DATA_DIR {DATA_DIR} is not writable")
+    for w in warnings:
+        _clog.warning("Config warning: %s", w)

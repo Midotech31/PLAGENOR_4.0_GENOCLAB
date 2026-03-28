@@ -18,9 +18,12 @@ from core.state_machine import (
 from core.repository import (
     get_request, save_request, get_member,
     increment_member_load, decrement_member_load,
-    create_notification,
+    create_notification, _get_db,
 )
 from core.audit_engine import log_workflow_transition
+from core.logger import get_logger
+
+_log = get_logger("workflow_engine")
 
 
 def get_allowed_transitions(request: dict) -> set:
@@ -30,6 +33,7 @@ def get_allowed_transitions(request: dict) -> set:
     try:
         return get_allowed_next_states(channel, current)
     except Exception:
+        _log.warning("Failed to get allowed transitions for %s/%s", channel, current, exc_info=True)
         return set()
 
 
@@ -56,51 +60,59 @@ def transition(request_id: str, to_state: str, actor: dict, **kwargs) -> dict:
     if role != config.ROLE_SUPER_ADMIN:
         _check_role_permission(channel, to_state, role)
 
-    # ── 3. UPDATE STATE ───────────────────────────────────────────────────
-    req["status"] = to_state
-    req["updated_at"] = datetime.now(timezone.utc).isoformat()
-    req["updated_by"] = actor.get("id", "")
+    # ── INT-03: Wrap state update + side effects in a single transaction ──
+    db = _get_db()
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        # ── 3. UPDATE STATE ───────────────────────────────────────────────
+        req["status"] = to_state
+        req["updated_at"] = datetime.now(timezone.utc).isoformat()
+        req["updated_by"] = actor.get("id", "")
 
-    # ── 4. HISTORY ────────────────────────────────────────────────────────
-    req.setdefault("history", []).append({
-        "from": from_state,
-        "to": to_state,
-        "by": actor.get("username", ""),
-        "at": req["updated_at"],
-        "details": kwargs.get("details", {}),
-    })
+        # ── 4. HISTORY ────────────────────────────────────────────────────
+        req.setdefault("history", []).append({
+            "from": from_state,
+            "to": to_state,
+            "by": actor.get("username", ""),
+            "at": req["updated_at"],
+            "details": kwargs.get("details", {}),
+        })
 
-    # ── 5. SIDE EFFECTS ──────────────────────────────────────────────────
-    # Assignment
-    if to_state == "ASSIGNED" and kwargs.get("member_id"):
-        req["assigned_to"] = kwargs["member_id"]
-        increment_member_load(kwargs["member_id"])
+        # ── 5. SIDE EFFECTS ──────────────────────────────────────────────
+        # Assignment
+        if to_state == "ASSIGNED" and kwargs.get("member_id"):
+            req["assigned_to"] = kwargs["member_id"]
+            increment_member_load(kwargs["member_id"])
 
-    # Unassignment on backward move (force_transition only — normal flow is forward-only)
-    if from_state == "ASSIGNED" and to_state not in (
-        "SAMPLE_RECEIVED", "ANALYSIS_STARTED", "ANALYSIS_FINISHED"
-    ):
-        if req.get("assigned_to"):
+        # Unassignment on backward move (force_transition only — normal flow is forward-only)
+        if from_state == "ASSIGNED" and to_state not in (
+            "SAMPLE_RECEIVED", "ANALYSIS_STARTED", "ANALYSIS_FINISHED"
+        ):
+            if req.get("assigned_to"):
+                decrement_member_load(req["assigned_to"])
+                req["assigned_to"] = None
+
+        # Completion releases member load
+        if to_state in ("COMPLETED", "CLOSED", "ARCHIVED") and req.get("assigned_to"):
             decrement_member_load(req["assigned_to"])
-            req["assigned_to"] = None
 
-    # Completion releases member load
-    if to_state in ("COMPLETED", "CLOSED", "ARCHIVED") and req.get("assigned_to"):
-        decrement_member_load(req["assigned_to"])
+        # Store extra kwargs on request
+        for key in ("rejection_reason", "quote_amount", "appointment_date",
+                    "report_file", "budget_amount", "justification",
+                    "payment_reference", "guest_token"):
+            if key in kwargs:
+                req[key] = kwargs[key]
 
-    # Store extra kwargs on request
-    for key in ("rejection_reason", "quote_amount", "appointment_date",
-                "report_file", "budget_amount", "justification",
-                "payment_reference", "guest_token"):
-        if key in kwargs:
-            req[key] = kwargs[key]
+        # Set guest token expiration (90 days)
+        if "guest_token" in kwargs:
+            req["guest_token_expires_at"] = (datetime.now(timezone.utc) + timedelta(days=90)).isoformat()
 
-    # Set guest token expiration (90 days)
-    if "guest_token" in kwargs:
-        req["guest_token_expires_at"] = (datetime.now(timezone.utc) + timedelta(days=90)).isoformat()
-
-    # ── 6. SAVE ───────────────────────────────────────────────────────────
-    save_request(req)
+        # ── 6. SAVE ──────────────────────────────────────────────────────
+        save_request(req)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     # ── 7. AUDIT LOG ─────────────────────────────────────────────────────
     log_workflow_transition(req, from_state, to_state, actor, kwargs.get("details"))
@@ -143,44 +155,11 @@ def force_transition(request_id: str, to_state: str, actor: dict,
 
 
 def _check_role_permission(channel: str, to_state: str, role: str):
-    """Check if role is allowed to trigger a transition to to_state."""
-    # IBTIKAR role permissions
-    ibtikar_roles = {
-        "SUBMITTED": [config.ROLE_REQUESTER],
-        "VALIDATION_PEDAGOGIQUE": [config.ROLE_PLATFORM_ADMIN],
-        "VALIDATION_FINANCE": [config.ROLE_FINANCE, config.ROLE_PLATFORM_ADMIN],
-        "PLATFORM_NOTE_GENERATED": [config.ROLE_PLATFORM_ADMIN],
-        "ASSIGNED": [config.ROLE_PLATFORM_ADMIN],
-        "SAMPLE_RECEIVED": [config.ROLE_MEMBER, config.ROLE_PLATFORM_ADMIN],
-        "ANALYSIS_STARTED": [config.ROLE_MEMBER],
-        "ANALYSIS_FINISHED": [config.ROLE_MEMBER],
-        "REPORT_UPLOADED": [config.ROLE_MEMBER],
-        "REPORT_VALIDATED": [config.ROLE_PLATFORM_ADMIN],
-        "COMPLETED": [config.ROLE_PLATFORM_ADMIN],
-        "CLOSED": [config.ROLE_PLATFORM_ADMIN],
-        "REJECTED": [config.ROLE_PLATFORM_ADMIN, config.ROLE_FINANCE],
-    }
-    # GENOCLAB role permissions
-    genoclab_roles = {
-        "REQUEST_CREATED": [config.ROLE_CLIENT],
-        "QUOTE_DRAFT": [config.ROLE_PLATFORM_ADMIN],
-        "QUOTE_SENT": [config.ROLE_PLATFORM_ADMIN],
-        "QUOTE_VALIDATED_BY_CLIENT": [config.ROLE_CLIENT],
-        "QUOTE_REJECTED_BY_CLIENT": [config.ROLE_CLIENT],
-        "INVOICE_GENERATED": [config.ROLE_FINANCE, config.ROLE_PLATFORM_ADMIN],
-        "PAYMENT_CONFIRMED": [config.ROLE_FINANCE],
-        "ASSIGNED": [config.ROLE_PLATFORM_ADMIN],
-        "SAMPLE_RECEIVED": [config.ROLE_MEMBER, config.ROLE_PLATFORM_ADMIN],
-        "ANALYSIS_STARTED": [config.ROLE_MEMBER],
-        "ANALYSIS_FINISHED": [config.ROLE_MEMBER],
-        "REPORT_UPLOADED": [config.ROLE_MEMBER],
-        "REPORT_VALIDATED": [config.ROLE_PLATFORM_ADMIN],
-        "COMPLETED": [config.ROLE_PLATFORM_ADMIN],
-        "ARCHIVED": [config.ROLE_PLATFORM_ADMIN],
-        "REJECTED": [config.ROLE_PLATFORM_ADMIN, config.ROLE_FINANCE],
-    }
-
-    role_map = ibtikar_roles if channel == config.CHANNEL_IBTIKAR else genoclab_roles
+    """Check if role is allowed to trigger a transition to to_state.
+    ARCH-02: Uses config.IBTIKAR_TRANSITION_ROLES / GENOCLAB_TRANSITION_ROLES
+    as single source of truth."""
+    role_map = (config.IBTIKAR_TRANSITION_ROLES if channel == config.CHANNEL_IBTIKAR
+                else config.GENOCLAB_TRANSITION_ROLES)
     allowed_roles = role_map.get(to_state, [])
 
     # Empty list = any role can trigger
@@ -197,4 +176,4 @@ def _send_notifications(req: dict, to_state: str, actor: dict):
         from services.notification_service import notify_workflow_transition
         notify_workflow_transition(req, to_state, actor)
     except Exception:
-        pass
+        _log.warning("Failed to send notifications for %s -> %s", req.get("id", ""), to_state, exc_info=True)

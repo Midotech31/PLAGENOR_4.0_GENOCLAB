@@ -106,8 +106,13 @@ def _render_member_dashboard_inner(user):
                             MAX_UPLOAD_MB = 50
                             uploaded = st.file_uploader("📄 Rapport", key=f"m_f_{req['id']}", type=["pdf","docx","xlsx","csv","zip","fastq","fasta","gz"])
                             if uploaded:
+                                # SEC-08: MIME-type validation
+                                from utils.validation import validate_file_mime
+                                mime_ok, mime_err = validate_file_mime(uploaded.name, uploaded.getvalue(), set(ALLOWED_UPLOAD_TYPES))
                                 ext = os.path.splitext(uploaded.name)[1].lower()
-                                if ext not in ALLOWED_UPLOAD_TYPES:
+                                if not mime_ok:
+                                    st.error(f"❌ {mime_err}")
+                                elif ext not in ALLOWED_UPLOAD_TYPES:
                                     st.error(f"❌ Type de fichier non autorisé: {ext}. Types acceptés: {', '.join(ALLOWED_UPLOAD_TYPES)}")
                                 elif uploaded.size > MAX_UPLOAD_MB * 1024 * 1024:
                                     st.error(f"❌ Fichier trop volumineux ({uploaded.size / 1024 / 1024:.1f} Mo). Maximum: {MAX_UPLOAD_MB} Mo.")
@@ -118,11 +123,15 @@ def _render_member_dashboard_inner(user):
                                     save_request(req)
                                     st.success(f"📎 Fichier uploadé: {uploaded.name}")
                         if st.button("✅ Valider", key=f"m_e2_{req['id']}", type="primary"):
-                            with st.spinner("⏳ Transition en cours..."):
-                                try:
-                                    transition(req["id"], ns, user, details={"notes": notes})
-                                    st.success(f"✅ {ns}"); st.rerun()
-                                except Exception as e: st.error(str(e))
+                            # UX-02: Require file upload before REPORT_UPLOADED
+                            if ns == "REPORT_UPLOADED" and not req.get("report_file"):
+                                st.error("❌ Veuillez uploader le rapport avant de valider cette transition.")
+                            else:
+                                with st.spinner("⏳ Transition en cours..."):
+                                    try:
+                                        transition(req["id"], ns, user, details={"notes": notes})
+                                        st.success(f"✅ {ns}"); st.rerun()
+                                    except Exception as e: st.error(str(e))
                     # Admin revision notes
                     if req.get("admin_revision_notes"):
                         st.warning(f"📝 Notes de révision admin: {req['admin_revision_notes']}")

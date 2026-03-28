@@ -33,8 +33,8 @@ from core.logger import get_logger
 _log = get_logger("super_admin_dashboard")
 
 def _hash_pw(pw):
-    from werkzeug.security import generate_password_hash
-    return generate_password_hash(pw, method="pbkdf2:sha256")
+    from utils import hash_password
+    return hash_password(pw)
 
 def render_super_admin_dashboard(user):
     try:
@@ -237,10 +237,10 @@ def _tab_users(user):
         su = st.selectbox("Utilisateur", list(tu.keys()), key="rpw_u")
         npw = st.text_input("Nouveau mot de passe", type="password", key="rpw_v")
         if st.button("🔑 Réinitialiser", key="rpw_b"):
-            if npw and len(npw)>=6:
+            if npw and len(npw) >= config.MIN_PASSWORD_LENGTH:
                 uid = tu[su]; ux = next((x for x in users if x.get("id")==uid), None)
                 if ux: ux["password_hash"] = _hash_pw(npw); save_user(ux); log_action("PASSWORD_RESET","USER",uid,actor=user); st.success(f"✅ MDP de {su} réinitialisé")
-            else: st.warning("Min 6 caractères")
+            else: st.warning(f"Min {config.MIN_PASSWORD_LENGTH} caractères")
 
 def _tab_members(user):
     members = get_all_members()
@@ -549,10 +549,14 @@ def _tab_audit():
     if tf != "Tous": filtered = [l for l in filtered if l.get("entity_type")==tf or tf in l.get("action","")]
     st.write(f"**{len(filtered)}** / {len(logs)} entrées")
     render_export_button(filtered, filename="audit_logs.csv", columns=["id","action","entity_type","actor_username","timestamp"])
-    for e in sorted(filtered, key=lambda x: x.get("timestamp",""), reverse=True)[:config.AUDIT_LOG_MAX_DISPLAY]:
-        a = e.get("action","")
+    sorted_logs = sorted(filtered, key=lambda x: x.get("timestamp",""), reverse=True)
+    paged_logs = render_pagination(sorted_logs, "audit_page", items_per_page=50)
+    from utils import sanitize_html as _esc
+    for e in paged_logs:
+        a = _esc(e.get("action",""))
         icon = "🔑" if "LOGIN" in a else "🔄" if "TRANSITION" in a else "💰" if "FINANCIAL" in a or "BUDGET" in a else "⚠️" if "OVERRIDE" in a else "➕" if "CREATED" in a else "🔵"
-        st.markdown(f'<div style="padding:6px 12px;border-left:3px solid #E8ECF1;margin-bottom:4px;font-size:13px">{icon} <strong>{a}</strong> <span style="color:#7F8C9B;margin-left:8px">par {e.get("actor_username","system")}</span> <span style="color:#ABB2B9;margin-left:8px">{fmt_datetime(e.get("timestamp",""))}</span></div>', unsafe_allow_html=True)
+        username = _esc(e.get("actor_username","system"))
+        st.markdown(f'<div style="padding:6px 12px;border-left:3px solid #E8ECF1;margin-bottom:4px;font-size:13px">{icon} <strong>{a}</strong> <span style="color:#7F8C9B;margin-left:8px">par {username}</span> <span style="color:#ABB2B9;margin-left:8px">{fmt_datetime(e.get("timestamp",""))}</span></div>', unsafe_allow_html=True)
 
 def _tab_system(user):
     section_header("Système", "⚙️")

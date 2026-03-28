@@ -1,5 +1,7 @@
 # core/services/ibtikar_service.py — PLAGENOR 4.0 IBTIKAR Service Layer
 # Business logic for IBTIKAR requests. Called from dashboards, never bypassed.
+# ARCH-03: document_service and registry_loader are imported inside functions
+# to break circular import: ibtikar_service → document_service → repository → ibtikar_service.
 
 from __future__ import annotations
 from datetime import datetime, timezone
@@ -14,6 +16,9 @@ from core.budget_engine import validate_annual_cap, approve_with_override
 from core.state_machine import validate_ibtikar_transition
 from core.repository import get_request, save_request
 from core.audit_engine import log_action, log_workflow_transition
+from core.logger import get_logger
+
+_log = get_logger("ibtikar_service")
 
 
 def submit_ibtikar_request(data: dict, actor: dict) -> dict:
@@ -81,7 +86,7 @@ def submit_ibtikar_request(data: dict, actor: dict) -> dict:
             saved["ibtikar_form_path"] = path
             save_request(saved)
     except Exception:
-        pass
+        _log.warning("Failed to auto-generate IBTIKAR form for %s", saved.get("id", ""), exc_info=True)
 
     return saved
 
@@ -180,6 +185,8 @@ def validate_finance(request_id: str, actor: dict, approved: bool,
                            {"budget_amount": amount})
 
     # ── AUTO-TRIGGER: Generate Platform Note and advance to PLATFORM_NOTE_GENERATED ──
+    # INT-06: This is an intentional double state transition (VALIDATION_FINANCE → PLATFORM_NOTE_GENERATED)
+    # within a single service call. The state machine validates both steps.
     try:
         note_state = "PLATFORM_NOTE_GENERATED"
         validate_ibtikar_transition(to_state, note_state)
@@ -203,8 +210,8 @@ def validate_finance(request_id: str, actor: dict, approved: bool,
                 req["platform_note_path"] = path
                 save_request(req)
         except Exception:
-            pass
+            _log.warning("Failed to generate platform note document for %s", req.get("id", ""), exc_info=True)
     except Exception:
-        pass  # If auto-transition fails, admin can do it manually
+        _log.warning("Auto-transition to PLATFORM_NOTE_GENERATED failed for %s, admin can do it manually", req.get("id", ""), exc_info=True)
 
     return req

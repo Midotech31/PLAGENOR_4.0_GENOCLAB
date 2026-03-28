@@ -19,3 +19,10 @@ def sanitize_dict(d: dict, keys: list = None) -> dict:
         if isinstance(v, str):
             result[k] = sanitize_html(v)
     return result
+
+
+# QC-05: Shared password hashing — single source of truth
+def hash_password(pw: str) -> str:
+    """Hash a password using werkzeug (hard dependency)."""
+    from werkzeug.security import generate_password_hash
+    return generate_password_hash(pw, method="pbkdf2:sha256")

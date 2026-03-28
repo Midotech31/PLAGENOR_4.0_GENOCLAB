@@ -11,73 +11,62 @@ from core.exceptions import BudgetExceededError, BudgetOverrideRequiredError
 
 
 def _get_ibtikar_budget_used(year: Optional[int] = None, requester_id: str = "") -> float:
-    """Calculate IBTIKAR budget consumed this year BY A SPECIFIC REQUESTER.
-    Budget is 200K DZD per requester per year, NOT a global cap."""
-    if year is None:
-        year = datetime.now().year
-    from core.repository import get_all_active_requests, get_all_archived_requests
-    total = 0.0
-    for req in get_all_active_requests() + get_all_archived_requests():
-        if req.get("channel") != config.CHANNEL_IBTIKAR:
-            continue
-        if req.get("status") in ("REJECTED", "DRAFT"):
-            continue
-        # Filter by requester if specified
-        if requester_id and req.get("requester_id") != requester_id:
-            continue
-        created = req.get("created_at", "")
-        try:
-            req_year = datetime.fromisoformat(created.replace("Z", "+00:00")).year
-        except Exception:
-            req_year = year
-        if req_year == year:
-            total += float(req.get("budget_amount", 0))
-    return total
+    """QC-03: Delegate to financial_engine's SQL-based implementation (single source of truth)."""
+    from core.financial_engine import get_ibtikar_budget_used_by_requester
+    return get_ibtikar_budget_used_by_requester(requester_id, year) if requester_id else 0.0
 
 
 def validate_annual_cap(amount: float, actor: dict, request_id: str = "",
                         requester_id: str = "") -> dict:
     """
-    Validate that adding `amount` does not exceed the IBTIKAR annual cap
-    FOR THE SPECIFIC REQUESTER (200K DZD per student per year).
-    Raises BudgetExceededError if exceeded and actor is NOT SUPER_ADMIN.
-    Raises BudgetOverrideRequiredError if exceeded and actor IS SUPER_ADMIN.
+    INT-02: Validate budget cap inside BEGIN IMMEDIATE transaction
+    to prevent TOCTOU race condition.
     """
-    used = _get_ibtikar_budget_used(requester_id=requester_id)
-    cap = config.IBTIKAR_BUDGET_CAP
-    projected = used + amount
+    from core.repository import _get_db
+    db = _get_db()
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        used = _get_ibtikar_budget_used(requester_id=requester_id)
+        cap = config.IBTIKAR_BUDGET_CAP
+        projected = used + amount
 
-    result = {
-        "used": used,
-        "cap": cap,
-        "amount": amount,
-        "projected": projected,
-        "exceeded": projected > cap,
-        "remaining": max(0, cap - used),
-        "pct_used": round(used / cap * 100, 1) if cap > 0 else 0,
-        "request_id": request_id,
-    }
+        result = {
+            "used": used,
+            "cap": cap,
+            "amount": amount,
+            "projected": projected,
+            "exceeded": projected > cap,
+            "remaining": max(0, cap - used),
+            "pct_used": round(used / cap * 100, 1) if cap > 0 else 0,
+            "request_id": request_id,
+        }
 
-    if not result["exceeded"]:
-        result["approved"] = True
-        return result
+        if not result["exceeded"]:
+            result["approved"] = True
+            db.commit()
+            return result
 
-    # Budget exceeded
-    if actor.get("role") == config.ROLE_SUPER_ADMIN:
-        result["override_possible"] = True
-        result["approved"] = False
-        raise BudgetOverrideRequiredError(
-            f"Budget IBTIKAR dépassé: {projected:,.0f} / {cap:,.0f} DZD. "
-            f"Override SUPER_ADMIN possible avec justification."
-        )
-    else:
-        result["override_possible"] = False
-        result["approved"] = False
-        raise BudgetExceededError(
-            f"Budget IBTIKAR dépassé: {projected:,.0f} / {cap:,.0f} DZD. "
-            f"Restant: {result['remaining']:,.0f} DZD. "
-            f"Seul le SUPER_ADMIN peut autoriser un dépassement."
-        )
+        # Budget exceeded
+        if actor.get("role") == config.ROLE_SUPER_ADMIN:
+            result["override_possible"] = True
+            result["approved"] = False
+            db.commit()
+            raise BudgetOverrideRequiredError(
+                f"Budget IBTIKAR dépassé: {projected:,.0f} / {cap:,.0f} DZD. "
+                f"Override SUPER_ADMIN possible avec justification."
+            )
+        else:
+            result["override_possible"] = False
+            result["approved"] = False
+            db.commit()
+            raise BudgetExceededError(
+                f"Budget IBTIKAR dépassé: {projected:,.0f} / {cap:,.0f} DZD. "
+                f"Restant: {result['remaining']:,.0f} DZD. "
+                f"Seul le SUPER_ADMIN peut autoriser un dépassement."
+            )
+    except Exception:
+        db.rollback()
+        raise
 
 
 def approve_with_override(request_id: str, actor: dict, amount: float,

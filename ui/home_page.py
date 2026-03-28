@@ -7,11 +7,14 @@ import config
 from core.repository import (
     get_all_users, save_user, save_request,
     get_request_by_guest_token, get_services_for_channel,
-    generate_request_id,
+    generate_request_id, get_user_by_username,
+    get_login_attempts, increment_login_attempts,
+    clear_login_attempts, set_lockout,
 )
 from core.audit_engine import log_action
 from ui.styles import get_global_css, get_login_css
 from services.registry_loader import load_service_registry
+from utils import sanitize_html as _escape_html
 
 _ASSETS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
 
@@ -20,26 +23,22 @@ def _img(name):
     return p if os.path.exists(p) else None
 
 def _verify_pw(stored, plain):
-    if not stored or not plain: return False
-    try:
-        from werkzeug.security import check_password_hash
-        if stored.startswith("pbkdf2:"): return check_password_hash(stored, plain)
-    except: pass
-    try:
-        import hashlib
-        return hashlib.sha256(plain.encode()).hexdigest() == stored
-    except: pass
-    return False
+    """Verify password — werkzeug is a hard dependency, no SHA-256 fallback."""
+    if not stored or not plain:
+        return False
+    from werkzeug.security import check_password_hash
+    return check_password_hash(stored, plain)
 
-def _find_user(u, p):
-    for user in (get_all_users() or []):
-        if user.get("username") == u and _verify_pw(user.get("password_hash",""), p):
-            return user
+def _find_user(username, plain_password):
+    """Use indexed SQL lookup instead of loading all users."""
+    user = get_user_by_username(username)
+    if user and _verify_pw(user.get("password_hash", ""), plain_password):
+        return user
     return None
 
 def _hash(pw):
-    from werkzeug.security import generate_password_hash
-    return generate_password_hash(pw, method="pbkdf2:sha256")
+    from utils import hash_password
+    return hash_password(pw)
 
 
 def render_home_page():
@@ -203,43 +202,38 @@ def _login():
             if st.form_submit_button("Se connecter", use_container_width=True, type="primary"):
                 if not u.strip() or not p.strip(): st.warning("Identifiant et mot de passe requis."); return
                 username = u.strip()
-                # Rate limiting
-                attempts_key = f"login_attempts_{username}"
-                lockout_key = f"login_lockout_{username}"
-                if st.session_state.get(lockout_key):
-                    lockout_time = datetime.fromisoformat(st.session_state[lockout_key])
-                    elapsed = (datetime.now(timezone.utc) - lockout_time).total_seconds()
-                    if elapsed < 900:  # 15 minutes
-                        remaining = int((900 - elapsed) / 60) + 1
-                        st.error(f"🔒 Compte temporairement verrouillé. Réessayez dans {remaining} minutes.")
-                        return
-                    else:
-                        del st.session_state[lockout_key]
-                        st.session_state[attempts_key] = 0
+                # Rate limiting — DB-persisted (SEC-02)
+                attempts_info = get_login_attempts(username)
+                if attempts_info.get("locked_until"):
+                    try:
+                        lockout_time = datetime.fromisoformat(attempts_info["locked_until"])
+                        elapsed = (datetime.now(timezone.utc) - lockout_time).total_seconds()
+                        if elapsed < 900:  # 15 minutes
+                            remaining = int((900 - elapsed) / 60) + 1
+                            st.error(f"🔒 Compte temporairement verrouillé. Réessayez dans {remaining} minutes.")
+                            return
+                        else:
+                            clear_login_attempts(username)
+                    except Exception:
+                        clear_login_attempts(username)
                 user = _find_user(username, p.strip())
                 if not user:
-                    st.session_state[attempts_key] = st.session_state.get(attempts_key, 0) + 1
-                    if st.session_state[attempts_key] >= 5:
-                        st.session_state[lockout_key] = datetime.now(timezone.utc).isoformat()
+                    increment_login_attempts(username)
+                    updated = get_login_attempts(username)
+                    if updated["count"] >= config.MAX_LOGIN_ATTEMPTS:
+                        set_lockout(username, datetime.now(timezone.utc).isoformat())
                         st.error("🔒 Trop de tentatives. Compte verrouillé pour 15 minutes.")
                     else:
                         st.error("Identifiant ou mot de passe incorrect.")
-                    # Log failed attempt
-                    try:
-                        from core.repository import save_audit_log
-                        save_audit_log({
-                            "action": "LOGIN_FAILED",
-                            "username": username,
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
-                            "details": {"attempts": st.session_state.get(attempts_key, 0)}
-                        })
-                    except Exception:
-                        pass
+                    log_action("LOGIN_FAILED", "AUTH", "", actor={"id": "", "username": username, "role": ""},
+                               details={"attempts": updated["count"]})
                     return
                 if not user.get("active", True): st.error("Compte désactivé."); return
                 # Reset attempts on successful login
-                st.session_state.pop(attempts_key, None)
-                st.session_state.pop(lockout_key, None)
+                clear_login_attempts(username)
+                # SEC-03: Generate per-session CSRF token
+                import secrets
+                st.session_state["csrf_token"] = secrets.token_urlsafe(32)
                 st.session_state["authenticated"] = True
                 st.session_state["user"] = user
                 log_action("LOGIN_SUCCESS", "AUTH", user.get("id",""), actor=user)
@@ -269,8 +263,8 @@ def _register():
             ru = st.text_input("Identifiant souhaité *")
             rpw = st.text_input("Mot de passe *", type="password")
             if st.form_submit_button("Créer mon compte", use_container_width=True, type="primary"):
-                if not rn.strip() or not re_.strip() or not ru.strip() or not rpw or len(rpw)<6:
-                    st.warning("Champs * obligatoires. Mot de passe min 6 car."); return
+                if not rn.strip() or not re_.strip() or not ru.strip() or not rpw or len(rpw) < config.MIN_PASSWORD_LENGTH:
+                    st.warning(f"Champs * obligatoires. Mot de passe min {config.MIN_PASSWORD_LENGTH} car."); return
                 if not r_univ.strip(): st.warning("Université / Organisation obligatoire."); return
                 if is_ibtikar and not r_sup.strip(): st.warning("Directeur de recherche obligatoire."); return
                 if any(u.get("username")==ru.strip() for u in get_all_users()): st.error("Identifiant déjà pris."); return
@@ -326,38 +320,48 @@ def _guest_submit():
                 if not gn.strip() or not ge.strip() or gs == "— Sélectionner —":
                     st.warning("Nom, email et service sont obligatoires."); return
                 channel = config.CHANNEL_IBTIKAR if "IBTIKAR" in g_channel else config.CHANNEL_GENOCLAB
-                token = str(uuid.uuid4())[:8].upper()
-                display_id = generate_request_id(channel)
-                req = {
-                    "id": str(uuid.uuid4()),
-                    "display_id": display_id,
-                    "title": f"{svc_code} — {gn.strip()}",
-                    "description": gd.strip(),
-                    "channel": channel,
-                    "status": "SUBMITTED" if channel == config.CHANNEL_IBTIKAR else "REQUEST_CREATED",
-                    "submitted_as_guest": True,
-                    "guest_token": token,
-                    "guest_name": gn.strip(),
-                    "guest_email": ge.strip(),
-                    "guest_phone": gp.strip(),
-                    "client_name": gn.strip(),
-                    "organization": go.strip(),
-                    "service_id": svc_code,
-                    "service_code": svc_code,
-                    "service_params": svc_params,
-                    "sample_count": 1,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                    "history": [{"from": None, "to": "SUBMITTED" if channel == config.CHANNEL_IBTIKAR else "REQUEST_CREATED",
-                                 "by": gn.strip(), "at": datetime.now(timezone.utc).isoformat()}],
-                }
-                save_request(req)
-                log_action("GUEST_REQUEST", "REQUEST", req["id"],
-                          actor={"id": "guest", "username": ge, "role": "GUEST"},
+                token = str(uuid.uuid4())  # SEC-05: full UUID for entropy
+                # ARCH-01/UX-01: Route through service layer for server-side validation
+                guest_actor = {"id": "guest", "username": ge.strip(), "role": "GUEST",
+                               "full_name": gn.strip()}
+                try:
+                    data = {
+                        "title": f"{svc_code} — {gn.strip()}",
+                        "description": gd.strip(),
+                        "service_code": svc_code,
+                        "service_id": svc_code,
+                        "service_params": svc_params,
+                        "client_name": gn.strip(),
+                        "organization": go.strip(),
+                        "contact": gp.strip(),
+                        "sample_count": 1,
+                    }
+                    if channel == config.CHANNEL_IBTIKAR:
+                        data["requester"] = {"full_name": gn.strip(), "institution": go.strip(), "email": ge.strip()}
+                        data["requester_name"] = gn.strip()
+                        from core.services.ibtikar_service import submit_ibtikar_request
+                        saved = submit_ibtikar_request(data, guest_actor)
+                    else:
+                        from core.services.genoclab_service import submit_genoclab_request
+                        saved = submit_genoclab_request(data, guest_actor)
+                    # Mark as guest and add tracking token
+                    saved["submitted_as_guest"] = True
+                    saved["guest_token"] = token
+                    saved["guest_name"] = gn.strip()
+                    saved["guest_email"] = ge.strip()
+                    saved["guest_phone"] = gp.strip()
+                    from datetime import timedelta
+                    saved["guest_token_expires_at"] = (datetime.now(timezone.utc) + timedelta(days=90)).isoformat()
+                    save_request(saved)
+                except Exception as e:
+                    st.error(f"❌ Erreur: {e}")
+                    return
+                log_action("GUEST_REQUEST", "REQUEST", saved["id"],
+                          actor=guest_actor,
                           details={"token": token, "channel": channel, "service": svc_code},
                           channel=channel)
                 st.success("✅ Demande soumise avec succès!")
-                st.markdown(f'<div style="background:rgba(39,174,96,0.08);border:2px solid #27AE60;border-radius:16px;padding:24px;text-align:center;margin:16px 0"><div style="color:#4A5568;font-size:13px">Votre code de suivi :</div><div style="font-size:36px;font-weight:800;color:#27AE60;font-family:monospace;letter-spacing:4px;margin:8px 0">{token}</div><div style="color:#718096;font-size:12px">Utilisez le menu "🔍 Suivi" pour suivre votre demande.</div></div>', unsafe_allow_html=True)
+                st.markdown(f'<div style="background:rgba(39,174,96,0.08);border:2px solid #27AE60;border-radius:16px;padding:24px;text-align:center;margin:16px 0"><div style="color:#4A5568;font-size:13px">Votre code de suivi :</div><div style="font-size:36px;font-weight:800;color:#27AE60;font-family:monospace;letter-spacing:4px;margin:8px 0">{_escape_html(token)}</div><div style="color:#718096;font-size:12px">Utilisez le menu "🔍 Suivi" pour suivre votre demande.</div></div>', unsafe_allow_html=True)
 
 
 def _section_track():
@@ -370,6 +374,10 @@ def _section_track():
             req = get_request_by_guest_token(tk.strip().upper())
             if not req: st.error("Aucune demande trouvée."); return
             from ui.shared_components import get_status_badge_html, fmt_date
-            st.markdown(f'<div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:16px;padding:24px;margin-top:12px;box-shadow:0 2px 8px rgba(0,0,0,0.04)"><div style="font-size:18px;font-weight:700;color:#1A202C;margin-bottom:8px">{req.get("title","")}</div><div style="margin-bottom:10px">{get_status_badge_html(req.get("status",""))}</div><div style="font-size:13px;color:#718096;line-height:1.8">📅 {fmt_date(req.get("created_at",""))} · 🧬 {req.get("service_id","—")} · 📊 {req.get("sample_count","—")} échantillons</div></div>', unsafe_allow_html=True)
+            title_safe = _escape_html(req.get("title", ""))
+            svc_safe = _escape_html(req.get("service_id", "—"))
+            st.markdown(f'<div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:16px;padding:24px;margin-top:12px;box-shadow:0 2px 8px rgba(0,0,0,0.04)"><div style="font-size:18px;font-weight:700;color:#1A202C;margin-bottom:8px">{title_safe}</div><div style="margin-bottom:10px">{get_status_badge_html(req.get("status",""))}</div><div style="font-size:13px;color:#718096;line-height:1.8">📅 {fmt_date(req.get("created_at",""))} · 🧬 {svc_safe} · 📊 {_escape_html(str(req.get("sample_count","—")))} échantillons</div></div>', unsafe_allow_html=True)
             for h in req.get("history", []):
-                st.markdown(f'<div style="padding:6px 12px;border-left:3px solid rgba(14,140,127,0.4);margin:4px 0;font-size:12px;color:#718096"><strong style="color:#4A5568">{h.get("from","Début")}</strong> → <strong style="color:#1A202C">{h.get("to","")}</strong> · {fmt_date(h.get("at",""))}</div>', unsafe_allow_html=True)
+                from_safe = _escape_html(h.get("from", "Début"))
+                to_safe = _escape_html(h.get("to", ""))
+                st.markdown(f'<div style="padding:6px 12px;border-left:3px solid rgba(14,140,127,0.4);margin:4px 0;font-size:12px;color:#718096"><strong style="color:#4A5568">{from_safe}</strong> → <strong style="color:#1A202C">{to_safe}</strong> · {fmt_date(h.get("at",""))}</div>', unsafe_allow_html=True)

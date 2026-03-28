@@ -357,7 +357,8 @@ def _migrate_json_to_sqlite():
 # ═══════════════════════════════════════════════════════════════════════════
 
 def run_migrations():
-    """Run all pending migrations. Safe to call multiple times."""
+    """Run all pending migrations. Safe to call multiple times.
+    INT-07: Uses BEGIN EXCLUSIVE to prevent concurrent migration runs."""
     current = _get_schema_version_from_db()
 
     if current == CURRENT_SCHEMA_VERSION:
@@ -366,10 +367,19 @@ def run_migrations():
 
     _log.info("Migration du schéma: v%s → v%s", current, CURRENT_SCHEMA_VERSION)
 
-    # Step 1: Import JSON data into SQLite (if JSON files exist)
-    _migrate_json_to_sqlite()
+    from core.repository import _get_db
+    db = _get_db()
+    db.execute("BEGIN EXCLUSIVE")
+    try:
+        # Step 1: Import JSON data into SQLite (if JSON files exist)
+        _migrate_json_to_sqlite()
 
-    # Step 2: Write new schema version to DB
-    _write_schema_version_to_db(CURRENT_SCHEMA_VERSION)
+        # Step 2: Write new schema version to DB
+        _write_schema_version_to_db(CURRENT_SCHEMA_VERSION)
+        db.commit()
+    except Exception:
+        db.rollback()
+        _log.error("Migration failed, rolling back", exc_info=True)
+        raise
 
     _log.info("Migration terminée. Schéma v%s (SQLite)", CURRENT_SCHEMA_VERSION)

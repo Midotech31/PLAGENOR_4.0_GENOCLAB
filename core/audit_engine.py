@@ -6,6 +6,9 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 import uuid
 from core.repository import save_audit_log, get_all_audit_logs
+from core.logger import get_logger
+
+_log = get_logger("audit_engine")
 
 
 def log_action(
@@ -31,7 +34,7 @@ def log_action(
     try:
         save_audit_log(entry)
     except Exception:
-        pass
+        _log.warning("Failed to save audit log: action=%s entity=%s", action, entity_id, exc_info=True)
     return entry
 
 
@@ -84,6 +87,7 @@ def safe_get_all_audit_logs() -> list:
     try:
         return get_all_audit_logs() or []
     except Exception:
+        _log.warning("Failed to retrieve audit logs", exc_info=True)
         return []
 
 

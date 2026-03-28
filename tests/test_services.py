@@ -1,6 +1,6 @@
 # tests/test_services.py — PLAGENOR 4.0 Services Unit Tests
+# ARCH-07: Uses isolated SQLite database per test class
 from __future__ import annotations
-import json
 import os
 import sys
 import tempfile
@@ -16,18 +16,19 @@ os.environ["PLAGENOR_DATA_DIR"] = _TEST_DATA_DIR
 
 import config  # noqa: E402
 config.DATA_DIR = _TEST_DATA_DIR
-config.NOTIFICATIONS_FILE = os.path.join(_TEST_DATA_DIR, "notifications.json")
-config.USERS_FILE = os.path.join(_TEST_DATA_DIR, "users.json")
-config.ACTIVE_REQUESTS_FILE = os.path.join(_TEST_DATA_DIR, "active_requests.json")
-config.ARCHIVED_REQUESTS_FILE = os.path.join(_TEST_DATA_DIR, "archived_requests.json")
-config.AUDIT_LOGS_FILE = os.path.join(_TEST_DATA_DIR, "audit_logs.json")
+config.DATABASE_FILE = os.path.join(_TEST_DATA_DIR, "test_plagenor_svc.db")
+config.BACKUPS_DIR = os.path.join(_TEST_DATA_DIR, "backups")
+os.makedirs(config.BACKUPS_DIR, exist_ok=True)
 
-from core import repository  # noqa: E402
-repository.NOTIFICATIONS_FILE = config.NOTIFICATIONS_FILE
-repository.USERS_FILE = config.USERS_FILE
-repository.ACTIVE_REQUESTS_FILE = config.ACTIVE_REQUESTS_FILE
-repository.ARCHIVED_REQUESTS_FILE = config.ARCHIVED_REQUESTS_FILE
-repository.AUDIT_LOGS_FILE = config.AUDIT_LOGS_FILE
+# Reset thread-local connection to use the test database
+import core.repository as repository  # noqa: E402
+repository._local = __import__("threading").local()
+
+
+def _reset_db():
+    """Reset the thread-local connection and reinitialise schema."""
+    repository._local = __import__("threading").local()
+    repository.ensure_data_directory()
 
 
 class TestPricingEngine(unittest.TestCase):
@@ -65,9 +66,6 @@ class TestPricingEngine(unittest.TestCase):
         samples = [{"name": "S1"}, {"name": "S2"}]
         params = {"analysis_mode": "premium", "pathogenic": True}
         result = calculate_price(service_def, params, samples)
-        # base_price = 5000 (pathogenic), multiplier = 1.5, 2 samples
-        # unit_price = int(5000 * 1.5) = 7500
-        # total = 7500 * 2 = 15000
         self.assertEqual(result["unit_price"], 7500)
         self.assertEqual(result["total"], 15000)
 
@@ -104,10 +102,7 @@ class TestNotificationService(unittest.TestCase):
     """Test notification creation and retrieval."""
 
     def setUp(self):
-        for path in [config.NOTIFICATIONS_FILE, config.USERS_FILE,
-                     config.ACTIVE_REQUESTS_FILE, config.AUDIT_LOGS_FILE]:
-            with open(path, "w") as f:
-                json.dump([], f)
+        _reset_db()
 
     def test_create_notification(self):
         notif = repository.create_notification({
@@ -173,10 +168,7 @@ class TestServicesCRUD(unittest.TestCase):
     """Test service CRUD operations."""
 
     def setUp(self):
-        config.SERVICES_FILE = os.path.join(_TEST_DATA_DIR, "services.json")
-        repository.SERVICES_FILE = config.SERVICES_FILE
-        with open(config.SERVICES_FILE, "w") as f:
-            json.dump([], f)
+        _reset_db()
 
     def test_save_and_get_service(self):
         svc = repository.save_service({

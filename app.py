@@ -26,6 +26,11 @@ st.set_page_config(
 import config
 from core.repository import ensure_data_directory
 
+# OPS-01: Health check endpoint via query params
+if st.query_params.get("health") == "1":
+    st.json({"status": "ok", "version": config.PLATFORM_VERSION})
+    st.stop()
+
 # Bootstrap data directory
 ensure_data_directory()
 
@@ -34,6 +39,8 @@ from core.migrations import run_migrations
 run_migrations()
 
 # ── Session Init ──────────────────────────────────────────────────────────────
+# SEC-09: Streamlit session_state lives server-side in the Tornado process.
+# For multi-node deployments, consider a shared session store (Redis, DB).
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 if "user" not in st.session_state:

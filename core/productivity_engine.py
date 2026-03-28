@@ -20,8 +20,10 @@ def get_productivity_status(score: float) -> str:
 
 
 def compute_member_productivity(member_id: str) -> dict:
-    all_requests = get_all_active_requests() + get_all_archived_requests()
-    assigned = [r for r in all_requests if r.get("assigned_to") == member_id]
+    # PERF-05: Use targeted SQL query instead of loading all requests
+    from core.repository import _get_all, _JSON_FIELDS_REQUESTS
+    assigned = _get_all("requests", _JSON_FIELDS_REQUESTS,
+                        "assigned_to=?", (member_id,))
 
     total = len(assigned)
     completed = [r for r in assigned if r.get("status") == "COMPLETED"]

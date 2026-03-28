@@ -308,6 +308,12 @@ CREATE TABLE IF NOT EXISTS payment_methods (
     active INTEGER DEFAULT 1
 );
 
+CREATE TABLE IF NOT EXISTS login_attempts (
+    username TEXT PRIMARY KEY,
+    count INTEGER DEFAULT 0,
+    locked_until TEXT
+);
+
 CREATE TABLE IF NOT EXISTS schema_version (
     key TEXT PRIMARY KEY DEFAULT 'version',
     version TEXT NOT NULL DEFAULT '0.0.0',
@@ -332,6 +338,9 @@ CREATE INDEX IF NOT EXISTS idx_invoices_client ON invoices(client_id);
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_members_user_id ON members(user_id);
+CREATE INDEX IF NOT EXISTS idx_requests_channel_status ON requests(channel, status);
+CREATE INDEX IF NOT EXISTS idx_requests_channel_archived ON requests(channel, archived);
+CREATE INDEX IF NOT EXISTS idx_requests_assigned_status ON requests(assigned_to, status);
 """
 
 
@@ -346,8 +355,24 @@ def _ensure_database():
 def ensure_data_directory():
     """Bootstrap data directory and SQLite database."""
     os.makedirs(config.DATA_DIR, exist_ok=True)
+    # OPS-04: Check write permissions
+    if not os.access(config.DATA_DIR, os.W_OK):
+        raise RuntimeError(
+            f"Data directory {config.DATA_DIR} is not writable. "
+            f"Check permissions or set PLAGENOR_DATA_DIR."
+        )
     os.makedirs(config.BACKUPS_DIR, exist_ok=True)
     _ensure_database()
+
+
+# ── Table column cache ────────────────────────────────────────────────────────
+_TABLE_COLUMNS: dict[str, set] = {}
+
+def _get_table_columns(table: str) -> set:
+    if table not in _TABLE_COLUMNS:
+        db = _get_db()
+        _TABLE_COLUMNS[table] = {r["name"] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+    return _TABLE_COLUMNS[table]
 
 
 # ── Generic upsert helper ────────────────────────────────────────────────────
@@ -361,9 +386,8 @@ def _upsert(table: str, data: dict, json_fields: set | None = None):
             if f in row and not isinstance(row[f], str):
                 row[f] = _json_dumps(row[f])
 
-    # Get column names the table actually has
-    cursor = db.execute(f"PRAGMA table_info({table})")
-    valid_cols = {r["name"] for r in cursor.fetchall()}
+    # Get column names the table actually has (cached)
+    valid_cols = _get_table_columns(table)
 
     # Filter to only known columns
     cols = [k for k in row if k in valid_cols]
@@ -426,7 +450,11 @@ def save_user(user):
     return user
 
 def delete_user(user_id):
-    _delete("users", user_id)
+    """Soft-delete: set active=False instead of hard delete to preserve referential integrity."""
+    user = get_user(user_id)
+    if user:
+        user["active"] = False
+        save_user(user)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -541,6 +569,10 @@ def archive_request(request_id):
     req = get_request(request_id)
     if not req:
         return None
+    # INT-04: Decrement member load if request is non-terminal and assigned
+    assigned = req.get("assigned_to")
+    if assigned and req.get("status") not in config.TERMINAL_STATES:
+        decrement_member_load(assigned)
     req["archived"] = 1
     req["archived_at"] = datetime.now(timezone.utc).isoformat()
     save_request(req)
@@ -579,6 +611,7 @@ def save_invoice(invoice):
 
 def get_next_invoice_number():
     db = _get_db()
+    db.execute("BEGIN IMMEDIATE")
     db.execute(
         "INSERT INTO sequences (key, value) VALUES (?, 0) "
         "ON CONFLICT(key) DO NOTHING",
@@ -624,8 +657,12 @@ def create_notification(notification):
 def get_notifications_for_user(user_id):
     user = get_user(user_id)
     user_role = (user or {}).get("role", "")
-    return [n for n in get_all_notifications()
-            if n.get("user_id") == user_id or n.get("role") == user_role]
+    db = _get_db()
+    rows = db.execute(
+        "SELECT * FROM notifications WHERE user_id=? OR role=? ORDER BY created_at DESC LIMIT 200",
+        (user_id, user_role)
+    ).fetchall()
+    return [_row_to_dict(r) for r in rows]
 
 def mark_notification_read(notif_id):
     db = _get_db()
@@ -649,7 +686,7 @@ def save_document(doc):
 # ═══════════════════════════════════════════════════════════════════════════
 # UTILITY
 # ═══════════════════════════════════════════════════════════════════════════
-def backup_all():
+def backup_all(max_backups: int = 30):
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_dir = os.path.join(config.BACKUPS_DIR, ts)
     os.makedirs(backup_dir, exist_ok=True)
@@ -660,6 +697,15 @@ def backup_all():
         dst = sqlite3.connect(dst_path)
         src.backup(dst)
         dst.close()
+        # Verify backup integrity
+        test = sqlite3.connect(dst_path)
+        test.execute("PRAGMA integrity_check").fetchone()
+        test.close()
+    # Prune old backups — keep last max_backups
+    from pathlib import Path
+    existing = sorted(Path(config.BACKUPS_DIR).iterdir(), key=lambda p: p.stat().st_mtime)
+    for old in existing[:-max_backups]:
+        shutil.rmtree(old, ignore_errors=True)
     return backup_dir
 
 def get_platform_stats():
@@ -687,11 +733,11 @@ def get_platform_stats():
     r = db.execute("SELECT COALESCE(SUM(total_ttc),0) as s FROM invoices").fetchone()
     total_revenue = r["s"]
 
-    rejection_list = ",".join(f"'{s}'" for s in config.REJECTION_STATES)
+    placeholders = ",".join("?" * len(config.REJECTION_STATES))
     r = db.execute(
         f"SELECT COALESCE(SUM(budget_amount),0) as s FROM requests "
-        f"WHERE archived=0 AND channel=? AND status NOT IN ({rejection_list})",
-        (config.CHANNEL_IBTIKAR,)
+        f"WHERE archived=0 AND channel=? AND status NOT IN ({placeholders})",
+        (config.CHANNEL_IBTIKAR, *config.REJECTION_STATES)
     ).fetchone()
     ibtikar_budget = r["s"]
 
@@ -780,6 +826,7 @@ def generate_request_id(channel: str) -> str:
     year = datetime.now().year
     key = f"{prefix}_{year}"
     db = _get_db()
+    db.execute("BEGIN IMMEDIATE")
     db.execute(
         "INSERT INTO sequences (key, value) VALUES (?, 0) ON CONFLICT(key) DO NOTHING",
         (key,)
@@ -910,6 +957,40 @@ def save_revenue_archive(archive: dict):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# LOGIN ATTEMPTS (DB-persisted brute-force protection)
+# ═══════════════════════════════════════════════════════════════════════════
+def get_login_attempts(username: str) -> dict:
+    db = _get_db()
+    row = db.execute("SELECT * FROM login_attempts WHERE username=?", (username,)).fetchone()
+    if row:
+        return {"username": row["username"], "count": row["count"], "locked_until": row["locked_until"]}
+    return {"username": username, "count": 0, "locked_until": None}
+
+def increment_login_attempts(username: str):
+    db = _get_db()
+    db.execute(
+        "INSERT INTO login_attempts (username, count) VALUES (?, 1) "
+        "ON CONFLICT(username) DO UPDATE SET count = count + 1",
+        (username,)
+    )
+    db.commit()
+
+def clear_login_attempts(username: str):
+    db = _get_db()
+    db.execute("DELETE FROM login_attempts WHERE username=?", (username,))
+    db.commit()
+
+def set_lockout(username: str, until: str):
+    db = _get_db()
+    db.execute(
+        "INSERT INTO login_attempts (username, count, locked_until) VALUES (?, 0, ?) "
+        "ON CONFLICT(username) DO UPDATE SET locked_until=?",
+        (username, until, until)
+    )
+    db.commit()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # CACHED WRAPPERS (st.cache_data with short TTL for dashboard reads)
 # ═══════════════════════════════════════════════════════════════════════════
 if _HAS_ST:
@@ -924,7 +1005,16 @@ if _HAS_ST:
     @st.cache_data(ttl=30)
     def cached_get_platform_stats():
         return get_platform_stats()
+
+    def invalidate_caches():
+        """Explicitly clear cached data after writes."""
+        cached_get_all_services.clear()
+        cached_get_all_members.clear()
+        cached_get_platform_stats.clear()
 else:
     cached_get_all_services = get_all_services
     cached_get_all_members = get_all_members
     cached_get_platform_stats = get_platform_stats
+
+    def invalidate_caches():
+        pass

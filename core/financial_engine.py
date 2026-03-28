@@ -10,6 +10,7 @@ from core.repository import (
     get_all_active_requests, get_all_archived_requests,
     get_all_invoices, save_invoice, get_next_invoice_number,
     get_request, get_revenue_archives, save_revenue_archive,
+    _get_db,
 )
 from core.audit_engine import log_financial_action, log_budget_override
 
@@ -19,57 +20,40 @@ from core.audit_engine import log_financial_action, log_budget_override
 # ═══════════════════════════════════════════════════════════════════════════
 
 def get_ibtikar_virtual_revenue(year: Optional[int] = None) -> dict:
-    """Calculate IBTIKAR virtual revenue = total budget consumed across ALL students.
-    Each student has 200K DA/year. IBTIKAR revenue = sum of all validated request budgets."""
+    """Calculate IBTIKAR virtual revenue using SQL aggregation (PERF-01)."""
     if year is None:
         year = datetime.now().year
-    total = 0.0
-    count = 0
-    requester_ids = set()
-    for req in get_all_active_requests() + get_all_archived_requests():
-        if req.get("channel") != config.CHANNEL_IBTIKAR:
-            continue
-        if req.get("status") in config.REJECTION_STATES:
-            continue
-        created = req.get("created_at", "")
-        try:
-            req_year = datetime.fromisoformat(created.replace("Z", "+00:00")).year
-        except Exception:
-            req_year = year
-        if req_year == year:
-            amt = float(req.get("budget_amount") or 0)
-            total += amt
-            count += 1
-            rid = req.get("requester_id", "")
-            if rid:
-                requester_ids.add(rid)
+    year_prefix = f"{year}-%"
+    db = _get_db()
+    rej_placeholders = ",".join("?" * len(config.REJECTION_STATES))
+    row = db.execute(
+        f"SELECT COALESCE(SUM(budget_amount),0) as total, COUNT(*) as cnt, "
+        f"COUNT(DISTINCT requester_id) as students "
+        f"FROM requests WHERE channel=? AND status NOT IN ({rej_placeholders}) "
+        f"AND created_at LIKE ?",
+        (config.CHANNEL_IBTIKAR, *config.REJECTION_STATES, year_prefix)
+    ).fetchone()
     return {
-        "total": total,
-        "count": count,
-        "students": len(requester_ids),
+        "total": float(row["total"]),
+        "count": row["cnt"],
+        "students": row["students"],
     }
 
 
 def get_ibtikar_budget_used_by_requester(requester_id: str, year: Optional[int] = None) -> float:
-    """Budget used by ONE specific student/requester."""
+    """Budget used by ONE specific student/requester — SQL query (PERF-01)."""
     if year is None:
         year = datetime.now().year
-    total = 0.0
-    for req in get_all_active_requests() + get_all_archived_requests():
-        if req.get("channel") != config.CHANNEL_IBTIKAR:
-            continue
-        if req.get("requester_id") != requester_id:
-            continue
-        if req.get("status") in config.REJECTION_STATES:
-            continue
-        created = req.get("created_at", "")
-        try:
-            req_year = datetime.fromisoformat(created.replace("Z", "+00:00")).year
-        except Exception:
-            req_year = year
-        if req_year == year:
-            total += float(req.get("budget_amount") or 0)
-    return total
+    year_prefix = f"{year}-%"
+    db = _get_db()
+    rej_placeholders = ",".join("?" * len(config.REJECTION_STATES))
+    row = db.execute(
+        f"SELECT COALESCE(SUM(budget_amount),0) as total FROM requests "
+        f"WHERE channel=? AND requester_id=? AND status NOT IN ({rej_placeholders}) "
+        f"AND created_at LIKE ?",
+        (config.CHANNEL_IBTIKAR, requester_id, *config.REJECTION_STATES, year_prefix)
+    ).fetchone()
+    return float(row["total"])
 
 
 def get_ibtikar_budget_used(year: Optional[int] = None) -> float:

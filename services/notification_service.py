@@ -43,7 +43,9 @@ def send_email_notification(to_email: str, subject: str, body_text: str) -> bool
         _log.info("Email envoyé à %s: %s", to_email, subject)
         return True
     except Exception as e:
-        _log.error("Échec envoi email à %s: %s", to_email, e)
+        # SEC-07: Mask SMTP credentials in error logs
+        err_msg = str(e).replace(config.SMTP_PASSWORD, "****") if hasattr(config, "SMTP_PASSWORD") and config.SMTP_PASSWORD else str(e)
+        _log.error("Échec envoi email à %s: %s", to_email, err_msg)
         return False
 
 
@@ -176,13 +178,18 @@ def notify_workflow_transition(request: dict, to_state: str, actor: dict):
 
 
 def get_unread_count(user_id: str) -> int:
-    notifs = get_all_notifications()
-    return sum(1 for n in notifs
-               if n.get("user_id") == user_id and not n.get("read", False))
+    """PERF-03: Use SQL COUNT instead of loading all notifications."""
+    from core.repository import _get_db
+    db = _get_db()
+    row = db.execute(
+        "SELECT COUNT(*) as cnt FROM notifications WHERE user_id=? AND read=0",
+        (user_id,)
+    ).fetchone()
+    return row["cnt"] if row else 0
 
 
 def get_user_notifications(user_id: str, limit: int = 50) -> list:
-    notifs = get_all_notifications()
-    user_notifs = [n for n in notifs if n.get("user_id") == user_id]
-    user_notifs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-    return user_notifs[:limit]
+    """PERF-03: Use SQL query with LIMIT instead of loading all notifications."""
+    from core.repository import get_notifications_for_user
+    notifs = get_notifications_for_user(user_id)
+    return notifs[:limit]

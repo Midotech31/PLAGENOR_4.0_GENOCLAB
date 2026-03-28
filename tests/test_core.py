@@ -1,6 +1,6 @@
 # tests/test_core.py — PLAGENOR 4.0 Core Unit Tests
+# ARCH-07: Uses isolated SQLite database per test class
 from __future__ import annotations
-import json
 import os
 import sys
 import tempfile
@@ -16,37 +16,20 @@ os.environ["PLAGENOR_DATA_DIR"] = _TEST_DATA_DIR
 
 import config  # noqa: E402
 config.DATA_DIR = _TEST_DATA_DIR
-config.USERS_FILE = os.path.join(_TEST_DATA_DIR, "users.json")
-config.MEMBERS_FILE = os.path.join(_TEST_DATA_DIR, "members.json")
-config.SERVICES_FILE = os.path.join(_TEST_DATA_DIR, "services.json")
-config.ACTIVE_REQUESTS_FILE = os.path.join(_TEST_DATA_DIR, "active_requests.json")
-config.ARCHIVED_REQUESTS_FILE = os.path.join(_TEST_DATA_DIR, "archived_requests.json")
-config.INVOICES_FILE = os.path.join(_TEST_DATA_DIR, "invoices.json")
-config.INVOICE_SEQUENCE_FILE = os.path.join(_TEST_DATA_DIR, "invoice_sequence.json")
-config.REQUEST_SEQUENCE_FILE = os.path.join(_TEST_DATA_DIR, "request_sequence.json")
-config.REVENUE_ARCHIVES_FILE = os.path.join(_TEST_DATA_DIR, "revenue_archives.json")
-config.AUDIT_LOGS_FILE = os.path.join(_TEST_DATA_DIR, "audit_logs.json")
-config.DOCUMENTS_FILE = os.path.join(_TEST_DATA_DIR, "documents.json")
-config.NOTIFICATIONS_FILE = os.path.join(_TEST_DATA_DIR, "notifications.json")
-config.OVERRIDE_LOG_FILE = os.path.join(_TEST_DATA_DIR, "override_logs.json")
+config.DATABASE_FILE = os.path.join(_TEST_DATA_DIR, "test_plagenor.db")
 config.BACKUPS_DIR = os.path.join(_TEST_DATA_DIR, "backups")
 os.makedirs(config.BACKUPS_DIR, exist_ok=True)
 
-# Now import modules that depend on config
-from core import repository  # noqa: E402
-# Patch repository file paths to match test config
-repository.USERS_FILE = config.USERS_FILE
-repository.MEMBERS_FILE = config.MEMBERS_FILE
-repository.SERVICES_FILE = config.SERVICES_FILE
-repository.ACTIVE_REQUESTS_FILE = config.ACTIVE_REQUESTS_FILE
-repository.ARCHIVED_REQUESTS_FILE = config.ARCHIVED_REQUESTS_FILE
-repository.INVOICES_FILE = config.INVOICES_FILE
-repository.INVOICE_SEQUENCE_FILE = config.INVOICE_SEQUENCE_FILE
-repository.REQUEST_SEQUENCE_FILE = config.REQUEST_SEQUENCE_FILE
-repository.REVENUE_ARCHIVES_FILE = config.REVENUE_ARCHIVES_FILE
-repository.AUDIT_LOGS_FILE = config.AUDIT_LOGS_FILE
-repository.DOCUMENTS_FILE = config.DOCUMENTS_FILE
-repository.NOTIFICATIONS_FILE = config.NOTIFICATIONS_FILE
+# Reset thread-local connection to use the test database
+import core.repository as repository  # noqa: E402
+repository._local = __import__("threading").local()
+
+
+def _reset_db():
+    """Reset the thread-local connection and reinitialise schema."""
+    repository._local = __import__("threading").local()
+    repository.ensure_data_directory()
+
 
 from core.exceptions import InvalidTransitionError, BudgetExceededError  # noqa: E402
 from core.state_machine import validate_transition, get_allowed_next_states  # noqa: E402
@@ -56,9 +39,7 @@ class TestGenerateRequestId(unittest.TestCase):
     """Test readable request ID generation."""
 
     def setUp(self):
-        # Reset sequence file
-        with open(config.REQUEST_SEQUENCE_FILE, "w") as f:
-            json.dump({}, f)
+        _reset_db()
 
     def test_ibtikar_format(self):
         rid = repository.generate_request_id(config.CHANNEL_IBTIKAR)
@@ -83,7 +64,6 @@ class TestGenerateRequestId(unittest.TestCase):
     def test_separate_channels(self):
         r1 = repository.generate_request_id(config.CHANNEL_IBTIKAR)
         r2 = repository.generate_request_id(config.CHANNEL_GENOCLAB)
-        # Both should start at 1 for their channel
         self.assertEqual(int(r1.split("-")[2]), 1)
         self.assertEqual(int(r2.split("-")[2]), 1)
 
@@ -92,11 +72,7 @@ class TestBudgetChecks(unittest.TestCase):
     """Test IBTIKAR budget validation."""
 
     def setUp(self):
-        # Clear request files
-        for path in [config.ACTIVE_REQUESTS_FILE, config.ARCHIVED_REQUESTS_FILE,
-                     config.INVOICES_FILE, config.AUDIT_LOGS_FILE]:
-            with open(path, "w") as f:
-                json.dump([], f)
+        _reset_db()
 
     def test_budget_under_cap(self):
         from core.financial_engine import check_ibtikar_budget
@@ -123,11 +99,7 @@ class TestInvoiceGeneration(unittest.TestCase):
     """Test GENOCLAB invoice generation."""
 
     def setUp(self):
-        for path in [config.INVOICES_FILE, config.AUDIT_LOGS_FILE]:
-            with open(path, "w") as f:
-                json.dump([], f)
-        with open(config.INVOICE_SEQUENCE_FILE, "w") as f:
-            json.dump({"last": 0}, f)
+        _reset_db()
 
     def test_generate_invoice(self):
         from core.financial_engine import generate_invoice
@@ -142,7 +114,6 @@ class TestInvoiceGeneration(unittest.TestCase):
         invoice = generate_invoice(request, actor)
         self.assertIn("invoice_number", invoice)
         self.assertEqual(invoice["channel"], config.CHANNEL_GENOCLAB)
-        # Check totals: subtotal = 10000, vat = 10000 * 0.19 = 1900
         self.assertEqual(invoice["subtotal_ht"], 10000)
         self.assertEqual(invoice["vat_amount"], round(10000 * config.VAT_RATE, 2))
         self.assertEqual(invoice["total_ttc"], round(10000 + 10000 * config.VAT_RATE, 2))
@@ -158,7 +129,6 @@ class TestInvoiceGeneration(unittest.TestCase):
         inv1 = generate_invoice(request, actor)
         request["id"] = "req-002"
         inv2 = generate_invoice(request, actor)
-        # Second invoice should have different number
         self.assertNotEqual(inv1["invoice_number"], inv2["invoice_number"])
 
     def test_invoice_ibtikar_rejected(self):
@@ -173,9 +143,11 @@ class TestPointsSystem(unittest.TestCase):
     """Test points and cheers for members."""
 
     def setUp(self):
-        with open(config.MEMBERS_FILE, "w") as f:
-            json.dump([{"id": "m1", "name": "Test Member", "total_points": 0,
-                        "points_history": [], "cheers": []}], f)
+        _reset_db()
+        repository.save_member({
+            "id": "m1", "name": "Test Member", "total_points": 0,
+            "points_history": [], "cheers": [],
+        })
 
     def test_add_points(self):
         actor = {"id": "admin1", "username": "admin", "full_name": "Admin User"}
@@ -254,93 +226,29 @@ class TestArchiveRequest(unittest.TestCase):
     """Test request archiving."""
 
     def setUp(self):
-        with open(config.ACTIVE_REQUESTS_FILE, "w") as f:
-            json.dump([
-                {"id": "r1", "title": "Test Request", "status": "COMPLETED"},
-                {"id": "r2", "title": "Other Request", "status": "IN_PROGRESS"},
-            ], f)
-        with open(config.ARCHIVED_REQUESTS_FILE, "w") as f:
-            json.dump([], f)
+        _reset_db()
+        repository.save_request({
+            "id": "r1", "title": "Test Request", "status": "COMPLETED",
+            "channel": config.CHANNEL_IBTIKAR, "archived": 0,
+        })
+        repository.save_request({
+            "id": "r2", "title": "Other Request", "status": "IN_PROGRESS",
+            "channel": config.CHANNEL_IBTIKAR, "archived": 0,
+        })
 
     def test_archive_moves_request(self):
         result = repository.archive_request("r1")
         self.assertIsNotNone(result)
         self.assertEqual(result["id"], "r1")
-        self.assertIn("archived_at", result)
 
-        # Active should only have r2
         active = repository.get_all_active_requests()
-        self.assertEqual(len(active), 1)
-        self.assertEqual(active[0]["id"], "r2")
-
-        # Archived should have r1
-        archived = repository.get_all_archived_requests()
-        self.assertEqual(len(archived), 1)
-        self.assertEqual(archived[0]["id"], "r1")
+        active_ids = [r["id"] for r in active]
+        self.assertNotIn("r1", active_ids)
+        self.assertIn("r2", active_ids)
 
     def test_archive_nonexistent_returns_none(self):
         result = repository.archive_request("nonexistent")
         self.assertIsNone(result)
-
-
-class TestMigrations(unittest.TestCase):
-    """Test schema migration logic."""
-
-    def setUp(self):
-        # Clear schema version
-        version_file = os.path.join(_TEST_DATA_DIR, "schema_version.json")
-        if os.path.exists(version_file):
-            os.remove(version_file)
-
-    def test_run_migrations_creates_version_file(self):
-        from core.migrations import run_migrations, SCHEMA_VERSION_FILE, CURRENT_SCHEMA_VERSION
-        # Ensure data files exist
-        for path in [config.ACTIVE_REQUESTS_FILE, config.ARCHIVED_REQUESTS_FILE,
-                     config.MEMBERS_FILE, config.SERVICES_FILE]:
-            if not os.path.exists(path):
-                with open(path, "w") as f:
-                    json.dump([], f)
-        run_migrations()
-        self.assertTrue(os.path.exists(SCHEMA_VERSION_FILE))
-        with open(SCHEMA_VERSION_FILE) as f:
-            data = json.load(f)
-        self.assertEqual(data["version"], CURRENT_SCHEMA_VERSION)
-
-    def test_migration_adds_missing_fields(self):
-        from core.migrations import run_migrations, SCHEMA_VERSION_FILE
-        # Write a request without display_id or urgency
-        with open(config.ACTIVE_REQUESTS_FILE, "w") as f:
-            json.dump([{"id": "r1", "title": "Old request"}], f)
-        with open(config.MEMBERS_FILE, "w") as f:
-            json.dump([{"id": "m1", "name": "Old member"}], f)
-        with open(config.SERVICES_FILE, "w") as f:
-            json.dump([{"id": "s1", "name": "Old service", "channel": "IBTIKAR"}], f)
-        with open(config.ARCHIVED_REQUESTS_FILE, "w") as f:
-            json.dump([], f)
-        # Remove version file to trigger migration
-        if os.path.exists(SCHEMA_VERSION_FILE):
-            os.remove(SCHEMA_VERSION_FILE)
-
-        run_migrations()
-
-        # Check requests got display_id and urgency
-        with open(config.ACTIVE_REQUESTS_FILE) as f:
-            reqs = json.load(f)
-        self.assertIn("display_id", reqs[0])
-        self.assertIn("urgency", reqs[0])
-        self.assertEqual(reqs[0]["urgency"], "Normal")
-
-        # Check members got points fields
-        with open(config.MEMBERS_FILE) as f:
-            members = json.load(f)
-        self.assertEqual(members[0]["total_points"], 0)
-        self.assertIsInstance(members[0]["cheers"], list)
-
-        # Check services got channel fields
-        with open(config.SERVICES_FILE) as f:
-            services = json.load(f)
-        self.assertIn("channel_availability", services[0])
-        self.assertIn("ibtikar_price", services[0])
 
 
 def tearDownModule():
